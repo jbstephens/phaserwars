@@ -28,23 +28,24 @@
     position: fixed; top: 0; bottom: 0;
     display: none; flex-direction: column;
     justify-content: flex-end;
-    padding: 16px; gap: 12px;
+    padding: max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    gap: 12px;
     z-index: 5; pointer-events: none;
   }
   body.touch .controls { display: flex; }
   body.arcade .controls.right { display: none; }
 
-  /* Pause button — top-center, small, only shown during fight/countdown */
+  /* Pause button — top-right, larger, kid-finger friendly, away from iOS status-bar tap zone */
   .hud-btn {
     position: fixed;
-    top: 8px; left: 50%;
-    transform: translateX(-50%);
-    width: 40px; height: 40px;
+    top: max(12px, env(safe-area-inset-top));
+    right: max(12px, env(safe-area-inset-right));
+    width: 56px; height: 56px;
     border-radius: 50%;
     background: rgba(255,255,255,0.18);
-    border: 2px solid rgba(255,255,255,0.5);
+    border: 2px solid rgba(255,255,255,0.55);
     color: #fff;
-    font-size: 18px;
+    font-size: 24px;
     font-weight: 700;
     display: none;
     align-items: center;
@@ -54,10 +55,12 @@
     padding: 0;
     line-height: 1;
     font-family: inherit;
+    touch-action: manipulation;
   }
   body.in-match .hud-btn { display: flex; }
   body.paused   .hud-btn { display: none; }
-  .hud-btn:active { transform: translateX(-50%) scale(0.92); background: rgba(255,255,255,0.35); }
+  .hud-btn:active { transform: scale(0.92); background: rgba(255,255,255,0.35); }
+  .overlay button, .mode-card, .arena-card, .fighter-card { touch-action: manipulation; }
   .controls.left  { left: 0;  align-items: flex-start; }
   .controls.right { right: 0; align-items: flex-end;   }
   .row { display: flex; gap: 12px; pointer-events: auto; align-items: center; }
@@ -256,7 +259,6 @@
     text-shadow: 0 2px 6px rgba(0,0,0,0.95), 0 0 3px rgba(0,0,0,1);
   }
 </style>
-</style>
 </head>
 <body>
 
@@ -295,11 +297,12 @@
   <div class="sub">Family Fighting Game</div>
   <div class="help">
     <b>Move:</b> A/D or &larr;/&rarr; &middot; <b>Jump:</b> W or &uarr; (press twice for a flipping double jump)<br>
-    <b>Attack:</b> F or / &middot; <b>Switch weapon:</b> G or .<br>
-    <em style="opacity:0.7">Weapons cycle: lightsaber &rarr; phaser &rarr; laser &rarr; grenade &rarr; forcefield &rarr; shield</em><br>
+    <b>Attack:</b> F or / &middot; <b>Switch weapon:</b> G or . &middot; <b>Pause:</b> Esc or P<br>
+    <em style="opacity:0.7">10 weapons cycle: lightsaber, phaser, laser, grenade, boomerang, freeze ray, mine, heal, forcefield, shield</em><br>
     <em style="opacity:0.7">Grab mystery boxes for power-ups. Watch out for meteors!</em>
   </div>
   <button id="startBtn">TAP TO FIGHT</button>
+  <button id="quickBtn" class="secondary">QUICK PLAY (random)</button>
 </div>
 
 <div id="select" class="overlay hidden">
@@ -332,7 +335,7 @@
     <button class="mode-card" data-mode="arcade">
       <div class="mode-icon">★</div>
       <div class="mode-title">ARCADE</div>
-      <div class="mode-desc">1 player vs CPU ladder (4 rounds + boss)</div>
+      <div class="mode-desc">1 player vs CPU ladder (3 rounds + boss)</div>
     </button>
   </div>
   <div class="picker-label" id="diffLabel" style="margin-top:14px;">CPU difficulty</div>
@@ -358,6 +361,7 @@
   <div id="arcadeText" style="font-size:clamp(18px,2.8vw,24px);margin-bottom:22px;line-height:1.5;"></div>
   <div>
     <button id="arcadeNextBtn">NEXT FIGHT</button>
+    <button id="arcadeRetryBtn" class="hidden">TRY AGAIN</button>
     <button id="arcadeDoneBtn" class="hidden">MAIN MENU</button>
   </div>
 </div>
@@ -594,15 +598,15 @@
     } catch {}
   }
 
-  // Short synthesized character grunts (more reliable than TTS for fast events)
-  const gruntLast = {};
-  function grunt(fighterId, type) {
-    if (!fighterId || !audioCtx) return;
+  // Short synthesized character grunts (more reliable than TTS for fast events).
+  // Throttle per-player so a mirror match doesn't silence one side's grunts.
+  function grunt(player, type) {
+    if (!player || !player.fighterId || !audioCtx) return;
     const now = Date.now();
-    const k = fighterId + ':' + type;
-    if (gruntLast[k] && now - gruntLast[k] < 320) return;
-    gruntLast[k] = now;
-    const f = FIGHTERS[fighterId];
+    player.gruntLast = player.gruntLast || {};
+    if (player.gruntLast[type] && now - player.gruntLast[type] < 320) return;
+    player.gruntLast[type] = now;
+    const f = FIGHTERS[player.fighterId];
     const pitch = (f && f.voice && f.voice.pitch) || 1;
     const t0 = audioCtx.currentTime;
     const o = audioCtx.createOscillator();
@@ -652,7 +656,7 @@
   const SABER_SLOPE     = 0.42;
 
   const LASER_DURATION  = 24;
-  const LASER_DAMAGE    = 0.8;
+  const LASER_DAMAGE    = 1.1;
   const LASER_COOLDOWN  = 70;
 
   const GRENADE_VX      = 6.5;
@@ -679,7 +683,7 @@
     { id:'doubleDamage', label:'DOUBLE DAMAGE!', color:'#ff5252', dur: 300 },
     { id:'heal',         label:'+35 HP',         color:'#7fff90', dur: 0   },
     { id:'speed',        label:'SPEED BOOST!',   color:'#7fdcff', dur: 300 },
-    { id:'mech',         label:'MECH MODE!',     color:'#aacaff', dur: 540 },
+    { id:'mech',         label:'GIANT MODE!',    color:'#aacaff', dur: 540 },
   ];
   const POWERUP_INTERVAL = [480, 720];
 
@@ -725,7 +729,7 @@
   const MECH_DURATION      = 540;
 
   // Versus mode round timer (seconds at 60 fps)
-  const ROUND_TIMER_FRAMES = 99 * 60;
+  const ROUND_TIMER_FRAMES = 60 * 60;
 
   // Floating combo text only on milestones (otherwise too spammy)
   const COMBO_MILESTONES   = new Set([3, 5, 7, 10, 15, 20, 30, 50]);
@@ -784,7 +788,7 @@
     p.hairColor = f.hairColor || f.color;
     p.name = f.name; p.fighterId = fighterId;
     p.bossMode = !!f.boss;
-    p.maxHp = p.bossMode ? Math.floor(MAX_HP * 1.5) : MAX_HP;
+    p.maxHp = p.bossMode ? Math.floor(MAX_HP * 1.3) : MAX_HP;
   }
 
   const projectiles   = [];
@@ -814,6 +818,7 @@
   let countdownLastPhase = -1;
   let roundTimer = 0;
   let introTimer = 0;
+  let koTimeoutId = null;
 
   let picks = [null, null];
   let pickStage = 0;
@@ -1064,13 +1069,25 @@
     const k = e.key.toLowerCase();
     keys[k] = true;
     if (['arrowleft','arrowright','arrowup','arrowdown',' ','/'].includes(k)) e.preventDefault();
-    if (k === 'escape' || k === 'p') {
+    if ((k === 'escape' || k === 'p') && !e.repeat) {
       if (state === 'paused') resumeGame();
       else pauseGame();
     }
     ensureAudio();
   }, { passive: false });
   window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+  // Auto-pause + audio recovery when tab loses focus / iPad locks / silence switch
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (state === 'fight' || state === 'countdown' || state === 'intro') pauseGame();
+    } else {
+      ensureAudio();
+    }
+  });
+  // Block iOS pinch-gesture interference with touch controls
+  window.addEventListener('gesturestart', e => e.preventDefault());
+  window.addEventListener('dblclick',     e => e.preventDefault());
 
   function readInputs() {
     if (state === 'intro') {
@@ -1121,6 +1138,8 @@
 
   // ───── particles ─────
   function spawnParticle(x, y, vx, vy, color, life, size) {
+    // Cap total particles so long combos don't pile up garbage
+    if (particles.length >= 220) particles.shift();
     particles.push({ x, y, vx, vy, color, life, maxLife: life, size });
   }
   function spawnHitSparks(x, y, color) {
@@ -1158,20 +1177,23 @@
     }
     const ddMult = (attacker && attacker.doubleDamageTime > 0) ? 2 : 1;
     const mechMult = (attacker && attacker.mechTime > 0) ? 2 : 1;
-    const bossMult = (attacker && attacker.bossMode) ? 1.3 : 1;
-    victim.hp -= amount * ddMult * mechMult * bossMult;
+    const bossMult = (attacker && attacker.bossMode) ? 1.15 : 1;
+    // Cap stacked multipliers at 3× so mech+double-damage+boss can't one-shot
+    const totalMult = Math.min(3, ddMult * mechMult * bossMult);
+    victim.hp -= amount * totalMult;
     victim.flash = 10;
     if (hitPause < HIT_PAUSE_FRAMES) hitPause = HIT_PAUSE_FRAMES;
     spawnHitSparks(victim.x + (attackerX > victim.x ? -12 : 12), GROUND + victim.yOff - PLAYER_H/2, victim.color);
-    grunt(victim.fighterId, 'hit');
+    grunt(victim, 'hit');
 
     // Combo tracking — floating text only on milestones to avoid screen spam
     if (attacker) {
       attacker.combo++;
       attacker.comboTimer = COMBO_WINDOW;
       if (COMBO_MILESTONES.has(attacker.combo)) {
+        const mechBoost = (victim.mechTime > 0 ? PLAYER_H * 0.35 : 0) + (victim.bossMode ? PLAYER_H * 0.12 : 0);
         floatingTexts.push({
-          x: victim.x, y: GROUND + victim.yOff - PLAYER_H - 18,
+          x: victim.x, y: GROUND + victim.yOff - PLAYER_H - 18 - mechBoost,
           vy: -1.4, time: 50,
           text: attacker.combo + ' HIT COMBO!',
           color: attacker.color,
@@ -1187,6 +1209,7 @@
     if (loser.ragdolling) return;
     loser.hp = 0;
     loser.ragdolling = true;
+    loser.vx = 0;  // stop running-leg animation during ragdoll
     const winner = (loser === players[0]) ? players[1] : players[0];
     const dirSign = (loser.x >= winner.x) ? 1 : -1;
     loser.ragdollVx = dirSign * KNOCKBACK_VX;
@@ -1203,23 +1226,33 @@
     slowMoTick = 0;
     shake = 32;
     sfx.ko();
-    if (winner.fighterId && !winner.bossMode) {
+    if (winner.fighterId && !winner.bossMode && !winner.isAI) {
       scores[winner.fighterId] = (scores[winner.fighterId] || 0) + 1;
       saveScores();
     }
     speakVoice(winner.fighterId);
-    // schedule overlay after the slow-mo finishes
-    setTimeout(() => onKOComplete(winner, loser), 1200);
+    // schedule overlay after the slow-mo finishes — track id so we can cancel
+    if (koTimeoutId) clearTimeout(koTimeoutId);
+    koTimeoutId = setTimeout(() => onKOComplete(winner, loser), 1200);
   }
 
   function onKOComplete(winner, loser) {
+    koTimeoutId = null;
+    // Bail if user navigated away during the delay
+    if (state !== 'fight' && state !== 'paused') return;
     stopMusic();
     if (mode === 'arcade') {
-      arcadeStage++;
-      if (arcadeStage >= ARCADE_TOTAL) {
+      const playerLost = winner.isAI;
+      if (playerLost) {
+        // Player died — game over regardless of round
         showArcadeVictory(winner);
       } else {
-        showArcadeNext(winner);
+        arcadeStage++;
+        if (arcadeStage >= ARCADE_TOTAL) {
+          showArcadeVictory(winner);
+        } else {
+          showArcadeNext(winner);
+        }
       }
     } else {
       const koText = document.getElementById('koText');
@@ -1334,7 +1367,36 @@
     document.getElementById('pause').classList.add('hidden');
     document.body.classList.remove('paused');
     pausedFromState = '';
+    clearMatchState();
     showStart();
+  }
+  function clearMatchState() {
+    projectiles.length = 0;
+    grenades.length = 0;
+    explosions.length = 0;
+    mysteryBoxes.length = 0;
+    meteors.length = 0;
+    floatingTexts.length = 0;
+    particles.length = 0;
+    boomerangs.length = 0;
+    mines.length = 0;
+    icicles.length = 0;
+    freezeFX.length = 0;
+    hitPause = 0; slowMo = 0; slowMoTick = 0;
+    introTimer = 0; countdownTime = 0; roundTimer = 0;
+    shake = 0;
+    if (koTimeoutId) { clearTimeout(koTimeoutId); koTimeoutId = null; }
+    for (const p of players) {
+      p.ragdolling = false; p.winPose = false; p.winPoseTime = 0;
+      p.flash = 0; p.mechTime = 0;
+      p.invincibleTime = 0; p.doubleDamageTime = 0; p.speedTime = 0;
+      p.frozenTime = 0;
+      p.combo = 0; p.comboTimer = 0;
+      p.laserTime = 0; p.freezeBeamTime = 0; p.saberSwing = 0;
+      p.ffTime = 0; p.shielding = false;
+      p.boomerangActive = false; p.mineActive = false;
+      p.vx = 0; p.yVel = 0;
+    }
   }
   function syncMatchUI() {
     const inMatch = state === 'fight' || state === 'countdown' || state === 'intro';
@@ -1359,7 +1421,7 @@
   // ───── AI ─────
   function updateAI(p, other) {
     const diff = aiDifficulty;
-    const reactionFrames = [60, 28, 14][diff];
+    const reactionFrames = [60, 32, 22][diff];
     p.aiTick--;
     if (p.aiTick <= 0) {
       p.aiTick = reactionFrames + Math.floor(Math.random() * 12);
@@ -1444,23 +1506,35 @@
   function showArcadeVictory(winner) {
     const txt = document.getElementById('arcadeText');
     const loser = (winner === players[0]) ? players[1] : players[0];
-    const playerWon = !winner.bossMode;
+    const playerWon = !winner.isAI;
     if (playerWon) {
       txt.innerHTML =
         `<span style="color:${winner.color}">${winner.name}</span><br>` +
         `<span style="font-size:1.3em;">DEFEATED ZORG!</span><br>` +
         `<span style="font-size:0.85em; opacity:0.85;">arcade champion</span>`;
+      document.getElementById('arcadeRetryBtn').classList.add('hidden');
     } else {
-      // Boss won the final round — game over
+      // Player lost — game over (any round)
       txt.innerHTML =
         `<span style="color:${winner.color}">${winner.name}</span><br>` +
         `<span style="font-size:1.3em;">DEFEATED <span style="color:${loser.color}">${loser.name}</span>!</span><br>` +
-        `<span style="font-size:0.85em; opacity:0.85;">arcade run ended</span>`;
+        `<span style="font-size:0.85em; opacity:0.85;">so close — try again?</span>`;
+      document.getElementById('arcadeRetryBtn').classList.remove('hidden');
     }
     document.getElementById('arcade').classList.remove('hidden');
     document.getElementById('arcadeNextBtn').classList.add('hidden');
     document.getElementById('arcadeDoneBtn').classList.remove('hidden');
     state = 'arcade-victory';
+  }
+  function arcadeRetry() {
+    document.getElementById('arcade').classList.add('hidden');
+    document.getElementById('arcadeRetryBtn').classList.add('hidden');
+    arcadeStage = 0;
+    const choices = FIGHTER_ORDER.filter(id => id !== picks[0]);
+    picks[1] = choices[Math.floor(Math.random() * choices.length)];
+    applyFighter(1, picks[1]);
+    aiDifficulty = 0;  // restart from easy
+    resetForFight(true);
   }
   function arcadeAdvance() {
     document.getElementById('arcade').classList.add('hidden');
@@ -1560,9 +1634,8 @@
     for (let i = 0; i < 2; i++) {
       const p = players[i], other = players[1 - i], inp = p.input;
 
-      // Combo decay + flash decay
+      // Combo decay (flash decay happens once below with the other timers)
       if (p.comboTimer > 0) { p.comboTimer--; if (p.comboTimer === 0) p.combo = 0; }
-      if (p.flash > 0) p.flash--;
 
       // Ragdoll mode: physics only
       if (p.ragdolling) {
@@ -1651,6 +1724,13 @@
         p.weapon = WEAPONS[(idx + 1) % WEAPONS.length];
         p.shielding = false;
         sfx.switch();
+        // Floating label so kids (especially non-readers) see what they switched to
+        floatingTexts.push({
+          x: p.x, y: GROUND + p.yOff - PLAYER_H - 18,
+          vy: -0.7, time: 50,
+          text: WEAPON_LABEL[p.weapon],
+          color: p.color, size: 18,
+        });
       }
       p.lastSwitch = inp.switch;
 
@@ -1667,7 +1747,7 @@
               p.saberHit = false;
               p.cooldown = SABER_COOLDOWN;
               sfx.saber();
-              grunt(p.fighterId, 'attack');
+              grunt(p, 'attack');
             }
           } else if (p.weapon === 'phaser') {
             if (attackEdge && p.cooldown <= 0) {
@@ -1679,7 +1759,7 @@
               });
               p.cooldown = PHASER_COOLDOWN;
               sfx.phaser();
-              grunt(p.fighterId, 'attack');
+              grunt(p, 'attack');
             }
           } else if (p.weapon === 'laser') {
             if (attackEdge && p.cooldown <= 0 && p.laserTime <= 0) {
@@ -1687,7 +1767,7 @@
               p.laserHitting = false;
               p.cooldown = LASER_COOLDOWN;
               sfx.laser();
-              grunt(p.fighterId, 'attack');
+              grunt(p, 'attack');
             }
           } else if (p.weapon === 'grenade') {
             if (attackEdge && p.cooldown <= 0) {
@@ -1701,7 +1781,7 @@
               });
               p.cooldown = GRENADE_COOLDOWN;
               sfx.grenade();
-              grunt(p.fighterId, 'attack');
+              grunt(p, 'attack');
             }
           } else if (p.weapon === 'boomerang') {
             if (attackEdge && p.cooldown <= 0 && !p.boomerangActive) {
@@ -1717,14 +1797,14 @@
               p.boomerangActive = true;
               p.cooldown = BOOMERANG_COOLDOWN;
               sfx.boomerang();
-              grunt(p.fighterId, 'attack');
+              grunt(p, 'attack');
             }
           } else if (p.weapon === 'freezeRay') {
             if (attackEdge && p.cooldown <= 0 && p.freezeBeamTime <= 0) {
               p.freezeBeamTime = FREEZE_DURATION;
               p.cooldown = FREEZE_COOLDOWN;
               sfx.freezeRay();
-              grunt(p.fighterId, 'attack');
+              grunt(p, 'attack');
             }
           } else if (p.weapon === 'mine') {
             if (attackEdge && p.cooldown <= 0 && !p.mineActive) {
@@ -1999,7 +2079,15 @@
     if (state === 'fight' && roundTimer > 0) {
       roundTimer--;
       if (roundTimer === 0) {
-        const loser = (players[0].hp > players[1].hp) ? players[1] : players[0];
+        // Pick loser: lower-HP loses; on exact tie, coin-flip
+        let loser;
+        if      (players[0].hp > players[1].hp) loser = players[1];
+        else if (players[1].hp > players[0].hp) loser = players[0];
+        else                                     loser = (Math.random() < 0.5) ? players[0] : players[1];
+        floatingTexts.push({
+          x: VW / 2, y: VH / 2 - 20, vy: -0.4, time: 80,
+          text: 'TIME UP!', color: '#ff5252', size: 36,
+        });
         triggerKO(loser);
       }
     }
@@ -2556,14 +2644,15 @@
       ctx.restore();
     }
 
-    // Mech mode metallic overlay
+    // Mech mode metallic overlay (centered on body pivot, not the wrong recalc)
+    const bodyCenterY = GROUND + p.yOff - PLAYER_H / 2;
     if (mech) {
       ctx.save();
       ctx.shadowBlur = 18; ctx.shadowColor = '#aacaff';
       ctx.strokeStyle = '#aacaff'; ctx.lineWidth = 2;
       ctx.globalAlpha = 0.7;
       ctx.beginPath();
-      ctx.ellipse(p.x, GROUND + p.yOff - PLAYER_H * sizeScale / 2, PLAYER_W * sizeScale * 0.55, PLAYER_H * sizeScale * 0.55, 0, 0, Math.PI * 2);
+      ctx.ellipse(p.x, bodyCenterY, PLAYER_W * sizeScale * 0.55, PLAYER_H * sizeScale * 0.55, 0, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
@@ -2577,7 +2666,7 @@
       ctx.shadowBlur = 20; ctx.shadowColor = '#aaff60';
       ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.ellipse(p.x, GROUND + p.yOff - PLAYER_H * sizeScale / 2, PLAYER_W * sizeScale * 0.6, PLAYER_H * sizeScale * 0.58, 0, 0, Math.PI * 2);
+      ctx.ellipse(p.x, bodyCenterY, PLAYER_W * sizeScale * 0.6, PLAYER_H * sizeScale * 0.58, 0, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
@@ -2878,10 +2967,15 @@
   function drawFloatingText(ft) {
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, ft.time / 30));
-    ctx.fillStyle = ft.color;
-    ctx.font = 'bold 16px -apple-system, sans-serif';
+    const sz = ft.size || 16;
+    ctx.font = `bold ${sz}px -apple-system, sans-serif`;
     ctx.textAlign = 'center';
-    ctx.shadowBlur = 6; ctx.shadowColor = '#000';
+    // Outline for readability over busy backgrounds (combo / TIME UP / weapon labels)
+    ctx.lineWidth = Math.max(3, sz * 0.18);
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+    ctx.strokeText(ft.text, ft.x, ft.y);
+    ctx.fillStyle = ft.color;
     ctx.fillText(ft.text, ft.x, ft.y);
     ctx.restore();
   }
@@ -3112,7 +3206,8 @@
       const isBoss = (arcadeStage === ARCADE_TOTAL - 1);
       ctx.fillStyle = isBoss ? '#aaff60' : '#ffb24d';
       ctx.font = 'bold 14px -apple-system, system-ui, sans-serif';
-      const label = isBoss ? 'BOSS BATTLE' : `ARCADE  ROUND ${arcadeStage + 1}/${ARCADE_TOTAL}`;
+      const diffName = ['EASY','MED','HARD'][aiDifficulty];
+      const label = isBoss ? `BOSS BATTLE · ${diffName}` : `ARCADE ${arcadeStage + 1}/${ARCADE_TOTAL} · ${diffName}`;
       ctx.fillText(label, VW / 2, y + barH / 2 + 4);
     }
 
@@ -3150,9 +3245,9 @@
     for (const b of mysteryBoxes) drawMysteryBox(b);
     for (const m of mines) drawMine(m);
     for (const p of players) drawShadow(p);
-    for (const p of players) drawPet(p);
     for (const p of players) drawPowerupAura(p);
     for (const p of players) drawPlayer(p);
+    for (const p of players) drawPet(p);
     for (const p of players) drawLaserBeam(p);
     for (const p of players) drawFreezeBeam(p);
     for (const p of players) drawShieldArc(p);
@@ -3188,6 +3283,18 @@
 
   // ───── UI wiring ─────
   document.getElementById('startBtn').addEventListener('click', () => { ensureAudio(); showMode(); });
+  // Quick Play — skip all menus and jump into a random versus match
+  document.getElementById('quickBtn').addEventListener('click', () => {
+    ensureAudio();
+    mode = 'versus';
+    picks = [
+      FIGHTER_ORDER[Math.floor(Math.random() * FIGHTER_ORDER.length)],
+      FIGHTER_ORDER[Math.floor(Math.random() * FIGHTER_ORDER.length)]
+    ];
+    currentArenaId = ARENA_ORDER[Math.floor(Math.random() * ARENA_ORDER.length)];
+    pickStage = 2;
+    beginMatch();
+  });
 
   // Mode select
   document.querySelectorAll('.mode-card').forEach(card => {
@@ -3239,6 +3346,7 @@
 
   // Arcade buttons
   document.getElementById('arcadeNextBtn').addEventListener('click', arcadeAdvance);
+  document.getElementById('arcadeRetryBtn').addEventListener('click', arcadeRetry);
   document.getElementById('arcadeDoneBtn').addEventListener('click', arcadeFinish);
 
   // Pause buttons

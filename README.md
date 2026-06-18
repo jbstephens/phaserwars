@@ -15,7 +15,7 @@ Ben, Luke, Mom, Dad — pick one each (or two of the same).
 | **Player 1** | A / D | W | F | G |
 | **Player 2** | ← / → | ↑ | / | . |
 
-Tap jump twice for a flipping double-jump. On iPad, on-screen D-pad and buttons appear at each end of the screen — kids hold one end each.
+Tap jump twice for a flipping double-jump. **Pause / resume:** `Esc` or `P`. On iPad, on-screen D-pad and buttons appear at each end of the screen — kids hold one end each; the pause button sits in the top-right corner.
 
 ## Weapons (cycle with switch)
 
@@ -24,7 +24,7 @@ Lightsaber · Phaser · Laser · Grenade · Boomerang · Freeze Ray · Mine · H
 ## Modes
 
 - **Versus** — 2 humans
-- **Arcade** — 1 human vs 4-round CPU ladder, ramping difficulty, boss on round 4
+- **Arcade** — 1 human vs CPU ladder: 3 ramping-difficulty rounds, then a boss fight against **ZORG the alien**
 
 ## Stages
 

@@ -298,7 +298,8 @@
   <div class="help">
     <b>Move:</b> A/D or &larr;/&rarr; &middot; <b>Jump:</b> W or &uarr; (press twice for a flipping double jump)<br>
     <b>Attack:</b> F or / &middot; <b>Switch weapon:</b> G or . &middot; <b>Pause:</b> Esc or P<br>
-    <em style="opacity:0.7">10 weapons cycle: lightsaber, phaser, laser, grenade, boomerang, freeze ray, mine, heal, forcefield, shield</em><br>
+    <em style="opacity:0.7">11 weapons cycle: lightsaber, phaser, laser, grenade, boomerang, freeze ray, mine, heal, forcefield, shield, fists. Weapons wear out and break — durability shown next to the name.</em><br>
+    <em style="opacity:0.7">Tip: hold jump while firing the laser to aim it upward. Fists alternate between punch + kick.</em><br>
     <em style="opacity:0.7">Grab mystery boxes for power-ups. Watch out for meteors!</em>
   </div>
   <button id="startBtn">TAP TO FIGHT</button>
@@ -709,7 +710,31 @@
   const METEOR_RADIUS    = 70;
   const METEOR_FALL_VY   = 14;
 
-  const WEAPONS = ['saber', 'phaser', 'laser', 'grenade', 'boomerang', 'freezeRay', 'mine', 'healPotion', 'forcefield', 'shield'];
+  const WEAPONS = ['saber', 'phaser', 'laser', 'grenade', 'boomerang', 'freezeRay', 'mine', 'healPotion', 'forcefield', 'shield', 'fists'];
+
+  // Unarmed melee — alternates punch/kick. Shorter range, lower damage.
+  const FISTS_DAMAGE     = 7;
+  const FISTS_RANGE      = 34;
+  const FISTS_COOLDOWN   = 22;
+  const FISTS_DURATION   = 10;
+
+  // Durability — uses before a weapon "breaks" and is locked out for the match.
+  // Powerful weapons break fastest; defensive/utility persist; fists never break.
+  const WEAPON_DURABILITY = {
+    saber: 25, phaser: 22, laser: 5, grenade: 8,
+    boomerang: 10, freezeRay: 8, mine: 6, healPotion: 5,
+    forcefield: 4, shield: 999, fists: 999,
+  };
+
+  // Laser aim — hold jump while firing to angle the beam upward
+  const LASER_AIM_UP_SLOPE = 0.7;
+
+  // Boss-fight enemy-ship raid timing
+  const SHIP_INTERVAL_MIN = 300;
+  const SHIP_INTERVAL_MAX = 480;
+  const SHIP_BOMB_DAMAGE  = 14;
+  const SHIP_BOMB_AOE     = 12;
+  const SHIP_BOMB_RADIUS  = 50;
 
   // ── new combat / juice / progression ──
   const COMBO_WINDOW       = 60;
@@ -764,7 +789,9 @@
       weapon: 'saber',
       cooldown: 0,
       saberSwing: 0, saberHit: false,
-      laserTime: 0, laserHitting: false,
+      laserTime: 0, laserHitting: false, laserAimUp: 0,
+      fistsSwing: 0, fistsHit: false, fistsAlternate: false,
+      weaponUses: {}, brokenWeapons: null, // Set instantiated lazily
       ffTime: 0, ffCD: 0,
       shielding: false,
       jumpsRemaining: 2,
@@ -812,6 +839,43 @@
   function playerW(p) { return PLAYER_W * (p.scale || 1); }
   function playerH(p) { return PLAYER_H * (p.scale || 1); }
 
+  // ── Weapon durability / cycle helpers ──
+  function nextAvailableWeapon(p, startIdx) {
+    for (let i = 1; i <= WEAPONS.length; i++) {
+      const idx = (startIdx + i) % WEAPONS.length;
+      const w = WEAPONS[idx];
+      if (!p.brokenWeapons || !p.brokenWeapons.has(w)) return w;
+    }
+    return 'fists';
+  }
+  function cycleToNextWeapon(p) {
+    p.weapon = nextAvailableWeapon(p, WEAPONS.indexOf(p.weapon));
+  }
+  function recordWeaponUse(p) {
+    if (!p.weaponUses) p.weaponUses = {};
+    p.weaponUses[p.weapon] = (p.weaponUses[p.weapon] || 0) + 1;
+    const max = WEAPON_DURABILITY[p.weapon] || 999;
+    if (p.weaponUses[p.weapon] >= max) breakWeapon(p);
+  }
+  function breakWeapon(p) {
+    if (!p.brokenWeapons) p.brokenWeapons = new Set();
+    const broken = p.weapon;
+    p.brokenWeapons.add(broken);
+    floatingTexts.push({
+      x: p.x, y: GROUND + p.yOff - PLAYER_H - 30,
+      vy: -0.8, time: 70,
+      text: WEAPON_LABEL[broken] + ' BROKEN!',
+      color: '#ff5252', size: 18,
+    });
+    spawnHitSparks(p.x, GROUND + p.yOff - PLAYER_H/2, '#999');
+    sfx.weaponBreak();
+    // Clear any in-flight effects from the broken weapon
+    if (broken === 'laser')      p.laserTime = 0;
+    if (broken === 'freezeRay')  p.freezeBeamTime = 0;
+    if (broken === 'forcefield') p.ffTime = 0;
+    cycleToNextWeapon(p);
+  }
+
   const projectiles   = [];
   const grenades      = [];
   const explosions    = [];
@@ -823,6 +887,9 @@
   const mines         = [];
   const icicles       = [];
   const freezeFX      = [];
+  const enemyShips    = [];
+  const enemyBombs    = [];
+  let bossShipTimer   = 240;
 
   let state = 'start';
   let mode = 'versus';                 // 'versus' | 'arcade'
@@ -925,6 +992,10 @@
     mechOn:    () => { [110,165,220].forEach((f,i)=>setTimeout(()=>blip(f,0.25,'sawtooth',0.10,f*0.7),i*80)); },
     count:     () => blip(660, 0.10, 'square', 0.09, 880),
     fight:     () => { blip(880, 0.22, 'sawtooth', 0.11, 220); setTimeout(()=>blip(440, 0.35, 'square', 0.09, 110), 80); },
+    fists:     () => blip(380, 0.08, 'square', 0.06, 240),
+    weaponBreak:() => { blip(180, 0.18, 'square', 0.10, 60); setTimeout(()=>blip(90, 0.22, 'sawtooth', 0.09, 40), 80); },
+    shipPass:  () => blip(420, 0.20, 'sawtooth', 0.05, 280),
+    bombDrop:  () => blip(260, 0.12, 'square', 0.06, 80),
     boom: () => {
       noiseBurst(0.35, 0.28, 2200, 160);
       blip(140, 0.28, 'sawtooth', 0.15, 40);
@@ -1448,10 +1519,15 @@
       p.frozenTime = 0;
       p.combo = 0; p.comboTimer = 0;
       p.laserTime = 0; p.freezeBeamTime = 0; p.saberSwing = 0;
+      p.fistsSwing = 0; p.fistsHit = false;
       p.ffTime = 0; p.shielding = false;
       p.boomerangActive = false; p.mineActive = false;
+      p.weaponUses = {}; p.brokenWeapons = new Set();
       p.vx = 0; p.yVel = 0;
     }
+    enemyShips.length = 0;
+    enemyBombs.length = 0;
+    bossShipTimer = 240;
   }
   function syncMatchUI() {
     const inMatch = state === 'fight' || state === 'countdown' || state === 'intro';
@@ -1655,7 +1731,9 @@
     players[0].weapon = 'saber'; players[1].weapon = 'saber';
     for (const p of players) {
       p.cooldown = 0; p.saberSwing = 0; p.saberHit = false; p.flash = 0;
-      p.laserTime = 0; p.laserHitting = false;
+      p.laserTime = 0; p.laserHitting = false; p.laserAimUp = 0;
+      p.fistsSwing = 0; p.fistsHit = false; p.fistsAlternate = false;
+      p.weaponUses = {}; p.brokenWeapons = new Set();
       p.ffTime = 0; p.ffCD = 0;
       p.shielding = false;
       p.jumpsRemaining = 2; p.flipping = false; p.flipPhase = 0;
@@ -1685,6 +1763,9 @@
     mines.length       = 0;
     icicles.length     = 0;
     freezeFX.length    = 0;
+    enemyShips.length  = 0;
+    enemyBombs.length  = 0;
+    bossShipTimer = 240;
     powerupTimer = 360 + Math.floor(Math.random() * 240);
     meteorTimer  = 180 + Math.floor(Math.random() * 120);
     shake = 0; hitPause = 0; slowMo = 0; slowMoTick = 0;
@@ -1801,11 +1882,9 @@
       else if (other.x < p.x - 1) p.facing = -1;
 
       if (state === 'fight' && inp.switch && !p.lastSwitch) {
-        const idx = WEAPONS.indexOf(p.weapon);
-        p.weapon = WEAPONS[(idx + 1) % WEAPONS.length];
+        cycleToNextWeapon(p);
         p.shielding = false;
         sfx.switch();
-        // Floating label so kids (especially non-readers) see what they switched to
         floatingTexts.push({
           x: p.x, y: GROUND + p.yOff - PLAYER_H - 18,
           vy: -0.7, time: 50,
@@ -1829,6 +1908,7 @@
               p.cooldown = SABER_COOLDOWN;
               sfx.saber();
               grunt(p, 'attack');
+              recordWeaponUse(p);
             }
           } else if (p.weapon === 'phaser') {
             if (attackEdge && p.cooldown <= 0) {
@@ -1841,14 +1921,18 @@
               p.cooldown = PHASER_COOLDOWN;
               sfx.phaser();
               grunt(p, 'attack');
+              recordWeaponUse(p);
             }
           } else if (p.weapon === 'laser') {
             if (attackEdge && p.cooldown <= 0 && p.laserTime <= 0) {
               p.laserTime = LASER_DURATION;
               p.laserHitting = false;
+              // Hold jump while firing to angle the beam upward
+              p.laserAimUp = inp.jump ? LASER_AIM_UP_SLOPE : 0;
               p.cooldown = LASER_COOLDOWN;
               sfx.laser();
               grunt(p, 'attack');
+              recordWeaponUse(p);
             }
           } else if (p.weapon === 'grenade') {
             if (attackEdge && p.cooldown <= 0) {
@@ -1863,6 +1947,7 @@
               p.cooldown = GRENADE_COOLDOWN;
               sfx.grenade();
               grunt(p, 'attack');
+              recordWeaponUse(p);
             }
           } else if (p.weapon === 'boomerang') {
             if (attackEdge && p.cooldown <= 0 && !p.boomerangActive) {
@@ -1879,6 +1964,7 @@
               p.cooldown = BOOMERANG_COOLDOWN;
               sfx.boomerang();
               grunt(p, 'attack');
+              recordWeaponUse(p);
             }
           } else if (p.weapon === 'freezeRay') {
             if (attackEdge && p.cooldown <= 0 && p.freezeBeamTime <= 0) {
@@ -1886,6 +1972,7 @@
               p.cooldown = FREEZE_COOLDOWN;
               sfx.freezeRay();
               grunt(p, 'attack');
+              recordWeaponUse(p);
             }
           } else if (p.weapon === 'mine') {
             if (attackEdge && p.cooldown <= 0 && !p.mineActive) {
@@ -1897,6 +1984,7 @@
               p.mineActive = true;
               p.cooldown = MINE_COOLDOWN;
               sfx.mineSet();
+              recordWeaponUse(p);
             }
           } else if (p.weapon === 'healPotion') {
             if (attackEdge && p.healCD <= 0 && p.hp < p.maxHp) {
@@ -1909,12 +1997,23 @@
               });
               spawnSparkles(p.x, GROUND + p.yOff - PLAYER_H/2, '#7fff90');
               sfx.heal();
+              recordWeaponUse(p);
             }
           } else if (p.weapon === 'forcefield') {
             if (attackEdge && p.ffTime <= 0 && p.ffCD <= 0) {
               p.ffTime = FF_DURATION;
               p.ffCD = FF_DURATION + FF_COOLDOWN;
               sfx.forcefield();
+              recordWeaponUse(p);
+            }
+          } else if (p.weapon === 'fists') {
+            if (attackEdge && p.cooldown <= 0) {
+              p.fistsSwing = FISTS_DURATION;
+              p.fistsHit = false;
+              p.fistsAlternate = !p.fistsAlternate;
+              p.cooldown = FISTS_COOLDOWN;
+              sfx.fists();
+              grunt(p, 'attack');
             }
           }
         }
@@ -1944,17 +2043,33 @@
 
       if (p.laserTime > 0) {
         p.laserTime--;
+        // Beam starts at the front-arm hand and slopes upward at p.laserAimUp per pixel forward
+        const beamHandX = p.x + p.facing * 38;
+        const beamHandY = GROUND + p.yOff - PLAYER_H + 36;
+        const forwardDist = (other.x - beamHandX) * p.facing;
+        if (forwardDist > 0) {
+          const beamY = beamHandY - p.laserAimUp * forwardDist;
+          const oppCY = GROUND + other.yOff - PLAYER_H/2;
+          if (Math.abs(beamY - oppCY) < PLAYER_H/2 + 6) {
+            const hitOK = dealDamage(p, other, LASER_DAMAGE, p.x);
+            if (hitOK && !p.laserHitting) { sfx.hit(); p.laserHitting = true; }
+            if (!hitOK) p.laserHitting = false;
+          } else p.laserHitting = false;
+        } else p.laserHitting = false;
+      } else p.laserHitting = false;
+
+      // Fists arc — alternates punch/kick; kick reaches a bit further
+      if (p.fistsSwing > 0) {
+        p.fistsSwing--;
         const dx = other.x - p.x;
         const dy = Math.abs(other.yOff - p.yOff);
         const inFront = dx * p.facing > 0;
-        if (inFront && dy < PLAYER_H) {
-          const hitOK = dealDamage(p, other, LASER_DAMAGE, p.x);
-          if (hitOK && !p.laserHitting) { sfx.hit(); p.laserHitting = true; }
-          if (!hitOK) p.laserHitting = false;
-        } else {
-          p.laserHitting = false;
+        const range = p.fistsAlternate ? FISTS_RANGE + 8 : FISTS_RANGE;
+        if (!p.fistsHit && inFront && Math.abs(dx) < range + PLAYER_W/2 && dy < PLAYER_H) {
+          if (dealDamage(p, other, FISTS_DAMAGE, p.x)) sfx.hit();
+          p.fistsHit = true;
         }
-      } else p.laserHitting = false;
+      }
 
       if (p.saberSwing > 0) {
         p.saberSwing--;
@@ -2072,6 +2187,48 @@
           shake = Math.max(shake, 26);   // bigger ground shake on impact
           meteors.splice(i, 1);
         }
+      }
+    }
+
+    // ── Boss raid: enemy ships fly across, drop bombs ──
+    if (state === 'fight' && (players[0].bossMode || players[1].bossMode)) {
+      bossShipTimer--;
+      if (bossShipTimer <= 0) {
+        spawnEnemyShip();
+        bossShipTimer = SHIP_INTERVAL_MIN + Math.floor(Math.random() * (SHIP_INTERVAL_MAX - SHIP_INTERVAL_MIN));
+      }
+    }
+    for (let i = enemyShips.length - 1; i >= 0; i--) {
+      const s = enemyShips[i];
+      s.x += s.vx;
+      s.dropTimer--;
+      if (s.dropTimer <= 0 && s.bombsLeft > 0 && s.x > 80 && s.x < VW - 80) {
+        enemyBombs.push({ x: s.x, y: s.y + 8, vy: 2 });
+        sfx.bombDrop();
+        s.dropTimer = 45 + Math.floor(Math.random() * 35);
+        s.bombsLeft--;
+      }
+      if (s.x < -50 || s.x > VW + 50) enemyShips.splice(i, 1);
+    }
+    for (let i = enemyBombs.length - 1; i >= 0; i--) {
+      const b = enemyBombs[i];
+      b.y += b.vy;
+      b.vy += 0.18;
+      let hit = false;
+      for (const pp of players) {
+        if (pp.ragdolling || pp.ghost) continue;
+        if (Math.abs(b.x - pp.x) < PLAYER_W/2 + 6 &&
+            b.y > GROUND + pp.yOff - PLAYER_H && b.y < GROUND + pp.yOff + 4) {
+          dealDamage(null, pp, SHIP_BOMB_DAMAGE, b.x);
+          sfx.hit();
+          hit = true;
+          break;
+        }
+      }
+      if (hit || b.y >= GROUND) {
+        explodeAt(b.x, GROUND - 4, SHIP_BOMB_RADIUS, hit ? 0 : SHIP_BOMB_AOE, null);
+        spawnHitSparks(b.x, hit ? b.y : GROUND, '#ff5252');
+        enemyBombs.splice(i, 1);
       }
     }
 
@@ -2417,6 +2574,18 @@
   function spawnMysteryBox() {
     mysteryBoxes.push({ x: 100 + Math.random() * (VW - 200), y: -30, vy: 0, rotation: 0, landed: false });
   }
+  function spawnEnemyShip() {
+    const fromLeft = Math.random() < 0.5;
+    enemyShips.push({
+      x: fromLeft ? -30 : VW + 30,
+      y: 50 + Math.random() * 50,
+      vx: fromLeft ? 1.8 : -1.8,
+      dropTimer: 80,
+      bombsLeft: 2 + Math.floor(Math.random() * 2),
+    });
+    sfx.shipPass();
+  }
+
   function spawnMeteor() {
     meteors.push({
       targetX: 80 + Math.random() * (VW - 160),
@@ -2671,6 +2840,11 @@
       legAX = p.x - 4; legBX = p.x + 4;
       legAY = hipY + 28 - tuck * 10; legBY = hipY + 24 - tuck * 6;
     }
+    // Kick: during fists alternate-swing the forward leg flies up + out
+    if (p.fistsSwing > 0 && p.weapon === 'fists' && p.fistsAlternate && grounded) {
+      if (p.facing > 0) { legBX = p.x + 42; legBY = groundY - 32; }
+      else              { legAX = p.x - 42; legAY = groundY - 32; }
+    }
     ctx.beginPath(); ctx.moveTo(p.x, hipY); ctx.lineTo(legAX, legAY); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(p.x, hipY); ctx.lineTo(legBX, legBY); ctx.stroke();
     ctx.fillStyle = '#1a1a1a';
@@ -2751,10 +2925,11 @@
     ctx.fillStyle = p.skinColor;
     ctx.beginPath(); ctx.arc(p.x - p.facing * 9 - armSwing, shoulderY + 27, 3.5, 0, Math.PI * 2); ctx.fill();
 
-    // front arm
+    // front arm (extends forward during a punch)
+    const punching = p.fistsSwing > 0 && p.weapon === 'fists' && !p.fistsAlternate;
     const shoulderX = p.x + p.facing * 7;
-    const handX = p.x + p.facing * 24;
-    const handY = shoulderY + 22;
+    const handX = p.x + p.facing * (punching ? 46 : 24);
+    const handY = shoulderY + (punching ? 18 : 22);
     ctx.strokeStyle = p.color; ctx.lineWidth = 7;
     ctx.beginPath(); ctx.moveTo(shoulderX, shoulderY + 3); ctx.lineTo(handX, handY); ctx.stroke();
     ctx.fillStyle = p.skinColor;
@@ -2923,6 +3098,20 @@
         ctx.arc(handX, handY - 14, 5, -Math.PI/2, -Math.PI/2 + Math.PI * 2 * (1 - p.healCD / HEAL_COOLDOWN));
         ctx.stroke();
       }
+    } else if (p.weapon === 'fists') {
+      // Bare hand — when punching, draw a bigger fist forward
+      if (p.fistsSwing > 0 && !p.fistsAlternate) {
+        ctx.fillStyle = p.skinColor;
+        ctx.beginPath(); ctx.arc(handX + p.facing * 4, handY, 6, 0, Math.PI * 2); ctx.fill();
+        // motion lines
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2;
+        for (let i = 1; i <= 3; i++) {
+          ctx.beginPath();
+          ctx.moveTo(handX - p.facing * i * 4, handY - 2);
+          ctx.lineTo(handX - p.facing * (i * 4 + 6), handY - 2);
+          ctx.stroke();
+        }
+      }
     }
   }
   function drawCooldownRing(p, handX, handY, max) {
@@ -2937,17 +3126,19 @@
     if (p.laserTime <= 0) return;
     const handX = p.x + p.facing * 38;
     const handY = GROUND + p.yOff - PLAYER_H + 36;
-    const endX = p.facing > 0 ? VW : 0;
+    const length = 900;
+    const endX = handX + p.facing * length;
+    const endY = handY - p.laserAimUp * length;
     const intensity = p.laserTime / LASER_DURATION;
     ctx.save();
     ctx.lineCap = 'round';
     ctx.shadowBlur = 28; ctx.shadowColor = p.color;
     ctx.strokeStyle = p.color;
     ctx.globalAlpha = 0.5 + 0.5 * intensity; ctx.lineWidth = 12;
-    ctx.beginPath(); ctx.moveTo(handX, handY); ctx.lineTo(endX, handY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(handX, handY); ctx.lineTo(endX, endY); ctx.stroke();
     ctx.shadowBlur = 0; ctx.strokeStyle = '#fff';
     ctx.globalAlpha = 1; ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.moveTo(handX, handY); ctx.lineTo(endX, handY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(handX, handY); ctx.lineTo(endX, endY); ctx.stroke();
     ctx.restore();
   }
   function drawForceField(p) {
@@ -3061,6 +3252,40 @@
     ctx.fillText('?', 0, 7);
     ctx.restore();
   }
+  function drawEnemyShip(s) {
+    ctx.save();
+    ctx.shadowBlur = 10; ctx.shadowColor = '#aaff60';
+    // hull (saucer)
+    ctx.fillStyle = '#5a5a6a';
+    ctx.beginPath(); ctx.ellipse(s.x, s.y, 24, 8, 0, 0, Math.PI * 2); ctx.fill();
+    // dome
+    ctx.fillStyle = '#aaff60';
+    ctx.beginPath(); ctx.arc(s.x, s.y - 4, 9, Math.PI, 2 * Math.PI); ctx.fill();
+    // window highlight
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(s.x - 2, s.y - 6, 2, 0, Math.PI * 2); ctx.fill();
+    // engine glow (opposite direction of travel)
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = '#ffce4d';
+    ctx.beginPath(); ctx.arc(s.x - Math.sign(s.vx) * 26, s.y + 2, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  function drawEnemyBomb(b) {
+    ctx.save();
+    ctx.shadowBlur = 8; ctx.shadowColor = '#ff5252';
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(b.x, b.y, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ff5252';
+    ctx.beginPath(); ctx.arc(b.x, b.y - 2, 2.5, 0, Math.PI * 2); ctx.fill();
+    // flicker fuse
+    if (Math.floor(b.y / 3) % 2) {
+      ctx.fillStyle = '#ffe066';
+      ctx.beginPath(); ctx.arc(b.x, b.y - 9, 2.5, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function drawMeteor(m) {
     const isIce = m.kind === 'ice';
     const telegraphColor = isIce ? '#5fb8ff' : '#ff3030';
@@ -3316,6 +3541,7 @@
     saber:'LIGHTSABER', phaser:'PHASER', laser:'LASER',
     grenade:'GRENADE', boomerang:'BOOMERANG', freezeRay:'FREEZE RAY',
     mine:'MINE', healPotion:'HEAL', forcefield:'FORCEFIELD', shield:'SHIELD',
+    fists:'FISTS',
   };
   function drawHUD() {
     if (!players[0].fighterId || !players[1].fighterId) return;
@@ -3325,7 +3551,13 @@
     ctx.font = 'bold 13px -apple-system, system-ui, sans-serif';
     ctx.textAlign = 'left';
     const w0 = scores[players[0].fighterId] || 0;
-    ctx.fillText(`${players[0].name} (${w0} W)  ·  ${WEAPON_LABEL[players[0].weapon]}`, pad + 2, y - 5);
+    function durLabel(p) {
+      const max = WEAPON_DURABILITY[p.weapon] || 999;
+      if (max >= 999) return '';
+      const used = (p.weaponUses || {})[p.weapon] || 0;
+      return ` [${Math.max(0, max - used)}]`;
+    }
+    ctx.fillText(`${players[0].name} (${w0} W)  ·  ${WEAPON_LABEL[players[0].weapon]}${durLabel(players[0])}`, pad + 2, y - 5);
 
     drawBar(VW - pad - barW, y, barW, barH, players[1].hp / players[1].maxHp, players[1].color, true);
     ctx.textAlign = 'right';
@@ -3333,7 +3565,7 @@
     const p1Label = players[1].bossMode ? `⚠ BOSS  ${players[1].name}`
                   : players[1].isAI ? `[CPU] ${players[1].name} (${w1} W)`
                   : `${players[1].name} (${w1} W)`;
-    ctx.fillText(`${WEAPON_LABEL[players[1].weapon]}  ·  ${p1Label}`, VW - pad - 2, y - 5);
+    ctx.fillText(`${WEAPON_LABEL[players[1].weapon]}${durLabel(players[1])}  ·  ${p1Label}`, VW - pad - 2, y - 5);
 
     // combo indicators (just under each health bar)
     ctx.font = 'bold 12px -apple-system, system-ui, sans-serif';
@@ -3410,6 +3642,8 @@
     for (const b  of boomerangs)  drawBoomerang(b);
     for (const ic of icicles)     drawIcicle(ic);
     for (const m  of meteors)     if (m.falling) drawMeteor(m);
+    for (const s  of enemyShips)  drawEnemyShip(s);
+    for (const b  of enemyBombs)  drawEnemyBomb(b);
     for (const e  of explosions)  drawExplosion(e);
     for (const pt of particles)   drawParticle(pt);
     for (const ft of floatingTexts) drawFloatingText(ft);

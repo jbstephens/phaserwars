@@ -2267,7 +2267,7 @@
   function getIntroState() {
     if (state !== 'countdown') return { panX: 0, panY: 0, zoomMul: 1 };
     const elapsedFromStart = COUNTDOWN_PHASE * 4 - countdownTime;
-    const introFrames = COUNTDOWN_PHASE * 1.9;
+    const introFrames = COUNTDOWN_PHASE * 2.2;
     if (elapsedFromStart >= introFrames) return { panX: 0, panY: 0, zoomMul: 1 };
     const t = elapsedFromStart / introFrames;
     const eased = t * t * (3 - 2 * t); // smoothstep

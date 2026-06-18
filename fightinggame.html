@@ -2159,22 +2159,23 @@
   }
 
   // ───── rendering ─────
-  // 2.5D camera: smooth follow on midpoint + zoom on player proximity + gentle hover oscillation.
-  let camX = 0, camZ = 1.08, camHover = 0;
+  // 2.5D camera: smooth follow on midpoint + aggressive zoom on player proximity + gentle hover.
+  let camX = 0, camZ = 1.0, camHover = 0;
 
   function updateCamera() {
-    let targetX = 0, targetZ = 1.08;
-    if (state === 'fight' && players[0].fighterId && players[1].fighterId) {
+    let targetX = 0, targetZ = 1.0;
+    if ((state === 'fight' || state === 'countdown') && players[0].fighterId && players[1].fighterId) {
       const mid = (players[0].x + players[1].x) / 2;
       targetX = mid - VW / 2;
       const dist = Math.abs(players[0].x - players[1].x);
-      targetZ = 1.30 - Math.min(0.22, dist / 800);
+      // Aggressive zoom: ~1.85x when touching, 1.0x at far distance, smooth between.
+      targetZ = Math.max(1.0, Math.min(1.85, 1.85 - dist / 380));
       // never pan past the arena edges (account for current zoom)
       const maxCamX = (VW / 2) * (1 - 1 / Math.max(targetZ, 1.0001));
       targetX = Math.max(-maxCamX, Math.min(maxCamX, targetX));
     }
-    camX += (targetX - camX) * 0.045;
-    camZ += (targetZ - camZ) * 0.03;
+    camX += (targetX - camX) * 0.07;
+    camZ += (targetZ - camZ) * 0.05;
     camHover = Math.sin(Date.now() / 1500) * 3.5;
   }
 

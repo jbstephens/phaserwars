@@ -188,31 +188,47 @@
   .diff-btn.selected { background: #fff; color: #000; border-color: #fff; }
 
   /* Arena cards */
-  .arenas { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-bottom: 14px; }
+  .arenas { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; margin-bottom: 14px; }
   .arena-card {
-    width: clamp(120px, 18vw, 150px);
-    aspect-ratio: 1 / 0.75;
+    width: clamp(130px, 20vw, 170px);
+    aspect-ratio: 1 / 0.95;
     border-radius: 14px;
-    border: 4px solid transparent;
+    border: 4px solid rgba(255,255,255,0.3);
     overflow: hidden;
     cursor: pointer;
     position: relative;
     color: #fff;
     font-family: inherit;
-    transition: transform 0.1s, border-color 0.1s;
+    transition: transform 0.1s, border-color 0.1s, box-shadow 0.1s;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.45);
   }
   .arena-card:active { transform: scale(0.96); }
-  .arena-card.selected { border-color: #fff; transform: scale(1.04); }
+  .arena-card:hover { border-color: rgba(255,255,255,0.7); }
+  .arena-card.selected {
+    border-color: #fff;
+    transform: scale(1.05);
+    box-shadow: 0 0 22px rgba(255,255,255,0.5);
+  }
   .arena-card .arena-bg {
     position: absolute; inset: 0;
     background: linear-gradient(to bottom, var(--top), var(--bot));
   }
+  .arena-card .arena-icon {
+    position: absolute;
+    top: 38%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: clamp(38px, 5vw, 52px);
+    filter: drop-shadow(0 3px 8px rgba(0,0,0,0.65));
+    line-height: 1;
+  }
   .arena-card .arena-name {
-    position: absolute; bottom: 6px; left: 0; right: 0;
+    position: absolute; bottom: 8px; left: 0; right: 0;
     text-align: center;
-    font-weight: 900; font-size: 14px;
-    letter-spacing: 1px;
-    text-shadow: 0 2px 6px rgba(0,0,0,0.6);
+    font-weight: 900;
+    font-size: clamp(14px, 1.7vw, 17px);
+    letter-spacing: 1.5px;
+    color: #fff;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.95), 0 0 3px rgba(0,0,0,1);
   }
 </style>
 </style>
@@ -429,7 +445,8 @@
   const ARENAS = {
     space: {
       name: 'Space Station',
-      cardTop: '#0a0a30', cardBot: '#001020',
+      cardTop: '#2a3aa0', cardBot: '#08082a',
+      cardIcon: '🪐',
       bgFn: 'space',
       platforms: [
         { x: 100, y: GROUND - 95,  w: 110, h: 16, kind: 'asteroid', color: '#8a5a3a' },
@@ -440,7 +457,8 @@
     },
     city: {
       name: 'City Rooftops',
-      cardTop: '#1a1a3a', cardBot: '#000018',
+      cardTop: '#5a4a8a', cardBot: '#1a1a3a',
+      cardIcon: '🏙️',
       bgFn: 'city',
       platforms: [
         { x: 60,  y: GROUND - 110, w: 140, h: 22, kind: 'building', color: '#333' },
@@ -451,7 +469,8 @@
     },
     volcano: {
       name: 'Volcano',
-      cardTop: '#3a0a05', cardBot: '#1a0000',
+      cardTop: '#cc3a18', cardBot: '#2a0500',
+      cardIcon: '🌋',
       bgFn: 'volcano',
       platforms: [
         { x: 90,  y: GROUND - 105, w: 110, h: 16, kind: 'rock', color: '#4a2a1a' },
@@ -464,7 +483,8 @@
     },
     ice: {
       name: 'Ice Planet',
-      cardTop: '#1a3a5a', cardBot: '#001020',
+      cardTop: '#5aaedc', cardBot: '#1a3a5a',
+      cardIcon: '❄️',
       bgFn: 'ice',
       platforms: [
         { x: 90,  y: GROUND - 115, w: 120, h: 18, kind: 'iceberg', color: '#aae6ff' },
@@ -477,7 +497,8 @@
     },
     jungle: {
       name: 'Jungle Canopy',
-      cardTop: '#0a3a1a', cardBot: '#001a08',
+      cardTop: '#3aa83a', cardBot: '#0a3a1a',
+      cardIcon: '🌴',
       bgFn: 'jungle',
       platforms: [
         { x: 65,  y: GROUND - 125, w: 140, h: 16, kind: 'branch', color: '#5a3a1a' },
@@ -2974,7 +2995,7 @@
     card.dataset.id = id;
     card.style.setProperty('--top', a.cardTop);
     card.style.setProperty('--bot', a.cardBot);
-    card.innerHTML = `<div class="arena-bg"></div><div class="arena-name">${a.name}</div>`;
+    card.innerHTML = `<div class="arena-bg"></div><div class="arena-icon">${a.cardIcon || ''}</div><div class="arena-name">${a.name}</div>`;
     card.addEventListener('click', () => {
       currentArenaId = id;
       [...arenasEl.children].forEach(c => c.classList.toggle('selected', c === card));

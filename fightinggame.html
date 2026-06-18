@@ -1435,10 +1435,20 @@
   }
   function showArcadeVictory(winner) {
     const txt = document.getElementById('arcadeText');
-    txt.innerHTML =
-      `<span style="color:${winner.color}">${winner.name}</span><br>` +
-      `<span style="font-size:1.3em;">DEFEATED ZORG!</span><br>` +
-      `<span style="font-size:0.85em; opacity:0.85;">arcade champion</span>`;
+    const loser = (winner === players[0]) ? players[1] : players[0];
+    const playerWon = !winner.bossMode;
+    if (playerWon) {
+      txt.innerHTML =
+        `<span style="color:${winner.color}">${winner.name}</span><br>` +
+        `<span style="font-size:1.3em;">DEFEATED ZORG!</span><br>` +
+        `<span style="font-size:0.85em; opacity:0.85;">arcade champion</span>`;
+    } else {
+      // Boss won the final round — game over
+      txt.innerHTML =
+        `<span style="color:${winner.color}">${winner.name}</span><br>` +
+        `<span style="font-size:1.3em;">DEFEATED <span style="color:${loser.color}">${loser.name}</span>!</span><br>` +
+        `<span style="font-size:0.85em; opacity:0.85;">arcade run ended</span>`;
+    }
     document.getElementById('arcade').classList.remove('hidden');
     document.getElementById('arcadeNextBtn').classList.add('hidden');
     document.getElementById('arcadeDoneBtn').classList.remove('hidden');
@@ -2257,17 +2267,17 @@
   function getIntroState() {
     if (state !== 'countdown') return { panX: 0, panY: 0, zoomMul: 1 };
     const elapsedFromStart = COUNTDOWN_PHASE * 4 - countdownTime;
-    const introFrames = COUNTDOWN_PHASE * 1.6;
+    const introFrames = COUNTDOWN_PHASE * 1.9;
     if (elapsedFromStart >= introFrames) return { panX: 0, panY: 0, zoomMul: 1 };
     const t = elapsedFromStart / introFrames;
     const eased = t * t * (3 - 2 * t); // smoothstep
     const damp = 1 - eased;
     return {
       // wavy "handheld camera flying in" pan, damps to zero
-      panX: damp * Math.sin(t * Math.PI * 2.4) * 110,
-      panY: damp * Math.cos(t * Math.PI * 3.1) * 24,
-      // start at 2.4× close-up, pull back to 1× by the end of the intro
-      zoomMul: 1 + damp * 1.4,
+      panX: damp * Math.sin(t * Math.PI * 2.6) * 135,
+      panY: damp * Math.cos(t * Math.PI * 3.3) * 30,
+      // start at 2.7× close-up, pull back to 1× by the end of the intro
+      zoomMul: 1 + damp * 1.7,
     };
   }
 

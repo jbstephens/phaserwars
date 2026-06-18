@@ -438,6 +438,11 @@
             voice:{ pitch:1.3, rate:1.05, taunts:["Yes!","Victory!","I did it!","Got 'em!"] }, pet:'heart' },
     dad:  { id:'dad',  name:'DAD',  color:'#4caf50', saberColor:'#b0ff90', skinColor:'#e3b388', hair:'short',
             voice:{ pitch:0.7, rate:0.95, taunts:["Booyah!","Oh yeah!","Got 'em!","Champion!"] }, pet:'frog' },
+    // Arcade boss — only appears as the final arcade opponent
+    alien:{ id:'alien', name:'ZORG', boss:true,
+            color:'#7ac010', saberColor:'#aaff60', skinColor:'#9adc4a',
+            hair:'antennae', hairColor:'#5a8a10',
+            voice:{ pitch:0.5, rate:0.85, taunts:["You cannot defeat me!","Zorg wins!","Foolish human!","I am inevitable!"] }, pet:'ufo' },
   };
   const FIGHTER_ORDER = ['ben', 'luke', 'mom', 'dad'];
 
@@ -683,6 +688,12 @@
 
   const MECH_DURATION      = 540;
 
+  // Versus mode round timer (seconds at 60 fps)
+  const ROUND_TIMER_FRAMES = 99 * 60;
+
+  // Floating combo text only on milestones (otherwise too spammy)
+  const COMBO_MILESTONES   = new Set([3, 5, 7, 10, 15, 20, 30, 50]);
+
   function makePlayer(opts) {
     return {
       x: opts.x, vx: 0,
@@ -692,6 +703,7 @@
       color: '#888', saberColor: '#fff', skinColor: '#f3d0a8',
       hair: 'short', hairColor: null,
       name: '?', fighterId: null,
+      maxHp: MAX_HP, bossMode: false,
       weapon: 'saber',
       cooldown: 0,
       saberSwing: 0, saberHit: false,
@@ -735,6 +747,8 @@
     p.hair = f.hair || 'short';
     p.hairColor = f.hairColor || f.color;
     p.name = f.name; p.fighterId = fighterId;
+    p.bossMode = !!f.boss;
+    p.maxHp = p.bossMode ? Math.floor(MAX_HP * 1.5) : MAX_HP;
   }
 
   const projectiles   = [];
@@ -762,6 +776,7 @@
   let slowMoTick = 0;
   let countdownTime = 0;
   let countdownLastPhase = -1;
+  let roundTimer = 0;
 
   let picks = [null, null];
   let pickStage = 0;
@@ -1095,23 +1110,24 @@
     }
     const ddMult = (attacker && attacker.doubleDamageTime > 0) ? 2 : 1;
     const mechMult = (attacker && attacker.mechTime > 0) ? 2 : 1;
-    victim.hp -= amount * ddMult * mechMult;
+    const bossMult = (attacker && attacker.bossMode) ? 1.3 : 1;
+    victim.hp -= amount * ddMult * mechMult * bossMult;
     victim.flash = 10;
     if (hitPause < HIT_PAUSE_FRAMES) hitPause = HIT_PAUSE_FRAMES;
     spawnHitSparks(victim.x + (attackerX > victim.x ? -12 : 12), GROUND + victim.yOff - PLAYER_H/2, victim.color);
     grunt(victim.fighterId, 'hit');
 
-    // Combo tracking (only for player-vs-player damage; hazards pass attacker=null)
+    // Combo tracking — floating text only on milestones to avoid screen spam
     if (attacker) {
       attacker.combo++;
       attacker.comboTimer = COMBO_WINDOW;
-      if (attacker.combo >= 2) {
+      if (COMBO_MILESTONES.has(attacker.combo)) {
         floatingTexts.push({
           x: victim.x, y: GROUND + victim.yOff - PLAYER_H - 18,
           vy: -1.4, time: 50,
           text: attacker.combo + ' HIT COMBO!',
           color: attacker.color,
-          size: Math.min(28, 14 + attacker.combo * 2),
+          size: Math.min(30, 14 + attacker.combo * 2),
         });
       }
     }
@@ -1139,7 +1155,7 @@
     slowMoTick = 0;
     shake = 32;
     sfx.ko();
-    if (winner.fighterId) {
+    if (winner.fighterId && !winner.bossMode) {
       scores[winner.fighterId] = (scores[winner.fighterId] || 0) + 1;
       saveScores();
     }
@@ -1329,13 +1345,29 @@
   // ───── arcade mode flow ─────
   function showArcadeNext(winner) {
     const txt = document.getElementById('arcadeText');
-    txt.innerHTML = `<span style="color:${winner.color}">${winner.name}</span> wins round ${arcadeStage}!<br><small style="opacity:0.85">Next opponent appears...</small>`;
+    const nextRound = arcadeStage; // arcadeStage was already incremented before this call
+    const isBossNext = (nextRound === ARCADE_TOTAL - 1);
+    if (isBossNext) {
+      txt.innerHTML =
+        `<span style="color:${winner.color}">${winner.name}</span> wins round ${nextRound}!<br><br>` +
+        `<span style="color:#aaff60; font-size:1.2em; letter-spacing:2px;">⚠ BOSS BATTLE ⚠</span><br>` +
+        `<span style="color:#aaff60; font-size:1.05em;">ZORG THE ALIEN APPROACHES!</span>`;
+      document.getElementById('arcadeNextBtn').textContent = 'FACE THE BOSS';
+    } else {
+      txt.innerHTML =
+        `<span style="color:${winner.color}">${winner.name}</span> wins round ${nextRound}!<br>` +
+        `<small style="opacity:0.85">Next opponent appears...</small>`;
+      document.getElementById('arcadeNextBtn').textContent = 'NEXT FIGHT';
+    }
     document.getElementById('arcade').classList.remove('hidden');
     state = 'arcade-interlude';
   }
   function showArcadeVictory(winner) {
     const txt = document.getElementById('arcadeText');
-    txt.innerHTML = `<span style="color:${winner.color}">${winner.name}</span><br>WINS THE ARCADE!`;
+    txt.innerHTML =
+      `<span style="color:${winner.color}">${winner.name}</span><br>` +
+      `<span style="font-size:1.3em;">DEFEATED ZORG!</span><br>` +
+      `<span style="font-size:0.85em; opacity:0.85;">arcade champion</span>`;
     document.getElementById('arcade').classList.remove('hidden');
     document.getElementById('arcadeNextBtn').classList.add('hidden');
     document.getElementById('arcadeDoneBtn').classList.remove('hidden');
@@ -1343,16 +1375,15 @@
   }
   function arcadeAdvance() {
     document.getElementById('arcade').classList.add('hidden');
-    // pick next CPU opponent (rotating fighters)
-    const idChoices = FIGHTER_ORDER.filter(id => id !== picks[0]);
-    picks[1] = idChoices[arcadeStage % idChoices.length];
-    applyFighter(1, picks[1]);
-    // ramp difficulty
-    aiDifficulty = Math.min(2, Math.floor(arcadeStage / 2));
-    // last round = "boss" — tougher (hard AI)
-    if (arcadeStage === ARCADE_TOTAL - 1) {
-      aiDifficulty = 2;
+    const isBossRound = (arcadeStage === ARCADE_TOTAL - 1);
+    if (isBossRound) {
+      picks[1] = 'alien';
+    } else {
+      const idChoices = FIGHTER_ORDER.filter(id => id !== picks[0]);
+      picks[1] = idChoices[arcadeStage % idChoices.length];
     }
+    applyFighter(1, picks[1]);
+    aiDifficulty = isBossRound ? 2 : Math.min(2, Math.floor(arcadeStage / 2));
     resetForFight(true);
   }
   function arcadeFinish() {
@@ -1363,7 +1394,8 @@
   }
 
   function resetForFight(dropIn) {
-    players[0].hp = MAX_HP; players[1].hp = MAX_HP;
+    players[0].hp = players[0].maxHp || MAX_HP; players[1].hp = players[1].maxHp || MAX_HP;
+    roundTimer = (mode === 'versus') ? ROUND_TIMER_FRAMES : 0;
     players[0].x = 220;     players[1].x = 580;
     players[0].facing = 1;  players[1].facing = -1;
     players[0].weapon = 'saber'; players[1].weapon = 'saber';
@@ -1607,8 +1639,8 @@
               sfx.mineSet();
             }
           } else if (p.weapon === 'healPotion') {
-            if (attackEdge && p.healCD <= 0 && p.hp < MAX_HP) {
-              p.hp = Math.min(MAX_HP, p.hp + HEAL_AMOUNT);
+            if (attackEdge && p.healCD <= 0 && p.hp < p.maxHp) {
+              p.hp = Math.min(p.maxHp, p.hp + HEAL_AMOUNT);
               p.healCD = HEAL_COOLDOWN;
               floatingTexts.push({
                 x: p.x, y: GROUND + p.yOff - PLAYER_H - 12,
@@ -1864,6 +1896,15 @@
       if (pt.life <= 0) particles.splice(i, 1);
     }
 
+    // ── Round timer (versus only) ──
+    if (state === 'fight' && roundTimer > 0) {
+      roundTimer--;
+      if (roundTimer === 0) {
+        const loser = (players[0].hp > players[1].hp) ? players[1] : players[0];
+        triggerKO(loser);
+      }
+    }
+
     // ── K.O. detection (only once per player) ──
     for (const p of players) {
       if (p.hp <= 0 && !p.ragdolling) {
@@ -2109,7 +2150,7 @@
     }
     if (choice.id === 'invincible')        p.invincibleTime = choice.dur;
     else if (choice.id === 'doubleDamage') p.doubleDamageTime = choice.dur;
-    else if (choice.id === 'heal')         p.hp = Math.min(MAX_HP, p.hp + 35);
+    else if (choice.id === 'heal')         p.hp = Math.min(p.maxHp, p.hp + 35);
     else if (choice.id === 'speed')        p.speedTime = choice.dur;
     else if (choice.id === 'mech')         { p.mechTime = choice.dur; sfx.mechOn(); }
     floatingTexts.push({ x: p.x, y: GROUND + p.yOff - PLAYER_H - 12, vy: -0.8, time: 60, text: choice.label, color: choice.color });
@@ -2231,15 +2272,16 @@
 
     const flip = p.flipping;
     const mech = p.mechTime > 0;
-    const mechScale = mech ? 1.7 : 1;
+    const boss = p.bossMode;
+    const sizeScale = mech ? 1.7 : (boss ? 1.22 : 1);
     const rotating = flip || p.ragdolling;
     const angle = p.ragdolling ? p.ragdollAng : (flip ? p.flipPhase : 0);
     const pivotY = GROUND + p.yOff - PLAYER_H/2;
-    const transformed = rotating || mech;
+    const transformed = rotating || mech || boss;
     if (transformed) {
       ctx.save();
       ctx.translate(p.x, pivotY);
-      if (mech) ctx.scale(mechScale, mechScale);
+      if (sizeScale !== 1) ctx.scale(sizeScale, sizeScale);
       if (rotating) ctx.rotate(angle);
       ctx.translate(-p.x, -pivotY);
     }
@@ -2316,15 +2358,31 @@
 
     // hair on head
     if (p.hair === 'long') {
-      // bangs sweeping across forehead
       ctx.fillStyle = p.hairColor;
       ctx.beginPath();
       ctx.ellipse(p.x, headY - 3, headR + 1, headR * 0.85, 0, Math.PI + 0.2, 2 * Math.PI - 0.2);
       ctx.fill();
-      // side strand on the facing side
       ctx.beginPath();
       ctx.ellipse(p.x - p.facing * (headR - 2), headY + 2, 3.5, headR - 1, 0, 0, Math.PI * 2);
       ctx.fill();
+    } else if (p.hair === 'antennae') {
+      // two stalks with glowing orbs at the tips
+      ctx.strokeStyle = p.hairColor || '#5a8a10';
+      ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(p.x - 4, headY - headR + 2);
+      ctx.quadraticCurveTo(p.x - 9, headY - headR - 6, p.x - 6, headY - headR - 14);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(p.x + 4, headY - headR + 2);
+      ctx.quadraticCurveTo(p.x + 9, headY - headR - 6, p.x + 6, headY - headR - 14);
+      ctx.stroke();
+      ctx.save();
+      ctx.shadowBlur = 10; ctx.shadowColor = p.saberColor || '#aaff60';
+      ctx.fillStyle = p.saberColor || '#aaff60';
+      ctx.beginPath(); ctx.arc(p.x - 6, headY - headR - 14, 3.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(p.x + 6, headY - headR - 14, 3.5, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
     } else {
       ctx.fillStyle = p.color;
       ctx.beginPath(); ctx.arc(p.x, headY, headR, Math.PI, 2 * Math.PI); ctx.fill();
@@ -2384,7 +2442,21 @@
       ctx.strokeStyle = '#aacaff'; ctx.lineWidth = 2;
       ctx.globalAlpha = 0.7;
       ctx.beginPath();
-      ctx.ellipse(p.x, GROUND + p.yOff - PLAYER_H * mechScale / 2, PLAYER_W * mechScale * 0.55, PLAYER_H * mechScale * 0.55, 0, 0, Math.PI * 2);
+      ctx.ellipse(p.x, GROUND + p.yOff - PLAYER_H * sizeScale / 2, PLAYER_W * sizeScale * 0.55, PLAYER_H * sizeScale * 0.55, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Boss alien aura (when not also in mech)
+    if (boss && !mech) {
+      ctx.save();
+      const pulse = Math.sin(Date.now() / 220) * 0.18 + 0.7;
+      ctx.globalAlpha = pulse;
+      ctx.strokeStyle = '#aaff60';
+      ctx.shadowBlur = 20; ctx.shadowColor = '#aaff60';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.ellipse(p.x, GROUND + p.yOff - PLAYER_H * sizeScale / 2, PLAYER_W * sizeScale * 0.6, PLAYER_H * sizeScale * 0.58, 0, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
@@ -2821,6 +2893,18 @@
       ctx.fillStyle = '#222';
       ctx.beginPath(); ctx.arc(px - 3, py - 4, 1.1, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(px + 3, py - 4, 1.1, 0, Math.PI * 2); ctx.fill();
+    } else if (F.pet === 'ufo') {
+      // flying saucer
+      ctx.fillStyle = '#888';
+      ctx.beginPath(); ctx.ellipse(px, py + 1, 12, 4, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#7ac010';
+      ctx.beginPath(); ctx.arc(px, py - 2, 7, Math.PI, 2 * Math.PI); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(px - 2, py - 4, 1.6, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 8; ctx.shadowColor = '#aaff60';
+      ctx.fillStyle = '#aaff60';
+      ctx.beginPath(); ctx.arc(px, py + 5, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
     }
     ctx.restore();
   }
@@ -2868,17 +2952,19 @@
   function drawHUD() {
     if (!players[0].fighterId || !players[1].fighterId) return;
     const barW = 250, barH = 18, pad = 16, y = 22;
-    drawBar(pad, y, barW, barH, players[0].hp / MAX_HP, players[0].color, false);
+    drawBar(pad, y, barW, barH, players[0].hp / players[0].maxHp, players[0].color, false);
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 13px -apple-system, system-ui, sans-serif';
     ctx.textAlign = 'left';
     const w0 = scores[players[0].fighterId] || 0;
     ctx.fillText(`${players[0].name} (${w0} W)  ·  ${WEAPON_LABEL[players[0].weapon]}`, pad + 2, y - 5);
 
-    drawBar(VW - pad - barW, y, barW, barH, players[1].hp / MAX_HP, players[1].color, true);
+    drawBar(VW - pad - barW, y, barW, barH, players[1].hp / players[1].maxHp, players[1].color, true);
     ctx.textAlign = 'right';
     const w1 = scores[players[1].fighterId] || 0;
-    const p1Label = players[1].isAI ? `[CPU] ${players[1].name} (${w1} W)` : `${players[1].name} (${w1} W)`;
+    const p1Label = players[1].bossMode ? `⚠ BOSS  ${players[1].name}`
+                  : players[1].isAI ? `[CPU] ${players[1].name} (${w1} W)`
+                  : `${players[1].name} (${w1} W)`;
     ctx.fillText(`${WEAPON_LABEL[players[1].weapon]}  ·  ${p1Label}`, VW - pad - 2, y - 5);
 
     // combo indicators (just under each health bar)
@@ -2892,16 +2978,31 @@
       ctx.fillText(`COMBO x${players[1].combo}`, VW - pad - 2, y + barH + 14);
     }
 
-    // middle status (music + meteors + arcade stage)
+    // Round timer (versus only) — big bold number, turns red under 10s
     ctx.textAlign = 'center';
-    ctx.font = 'bold 11px -apple-system, system-ui, sans-serif';
+    if (roundTimer > 0 && (state === 'fight' || state === 'countdown')) {
+      const secs = Math.ceil(roundTimer / 60);
+      ctx.fillStyle = secs <= 10 ? '#ff5252' : '#fff';
+      ctx.font = 'bold 28px -apple-system, system-ui, sans-serif';
+      ctx.shadowBlur = 12; ctx.shadowColor = '#000';
+      ctx.fillText(secs.toString(), VW / 2, y + barH + 6);
+      ctx.shadowBlur = 0;
+    } else if (mode === 'arcade') {
+      const isBoss = (arcadeStage === ARCADE_TOTAL - 1);
+      ctx.fillStyle = isBoss ? '#aaff60' : '#ffb24d';
+      ctx.font = 'bold 14px -apple-system, system-ui, sans-serif';
+      const label = isBoss ? 'BOSS BATTLE' : `ARCADE  ROUND ${arcadeStage + 1}/${ARCADE_TOTAL}`;
+      ctx.fillText(label, VW / 2, y + barH / 2 + 4);
+    }
+
+    // Bottom row: music + meteors
     let info = [];
-    if (mode === 'arcade') info.push(`ARCADE  ROUND ${arcadeStage + 1}/${ARCADE_TOTAL}`);
     if (musicSched) info.push('♪ ' + TRACKS[musicTrackIdx].name);
     if (meteorMode) info.push('☄ METEORS');
     if (info.length) {
       ctx.fillStyle = '#ffb24d';
-      ctx.fillText(info.join('  ·  '), VW / 2, y + barH / 2 + 4);
+      ctx.font = 'bold 11px -apple-system, system-ui, sans-serif';
+      ctx.fillText(info.join('  ·  '), VW / 2, y + barH + 32);
     }
   }
 

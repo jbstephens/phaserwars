@@ -697,6 +697,7 @@
   const KO_SLOWMO_FRAMES   = 70;
   const KO_SLOWMO_STEP     = 3;
   const COUNTDOWN_PHASE    = 45;
+  const INTRO_FRAMES       = 200;
   const KNOCKBACK_VX       = 7;
   const KNOCKBACK_VY       = -8;
 
@@ -812,6 +813,7 @@
   let countdownTime = 0;
   let countdownLastPhase = -1;
   let roundTimer = 0;
+  let introTimer = 0;
 
   let picks = [null, null];
   let pickStage = 0;
@@ -1071,6 +1073,12 @@
   window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
   function readInputs() {
+    if (state === 'intro') {
+      for (const p of players) {
+        Object.keys(p.input).forEach(k => p.input[k] = false);
+      }
+      return;
+    }
     const p1 = players[0].input, t1 = players[0].touchInput;
     if (players[0].isAI) {
       p1.left = t1.left; p1.right = t1.right; p1.jump = t1.jump; p1.attack = t1.attack; p1.switch = t1.switch;
@@ -1305,7 +1313,7 @@
   // ───── Pause / Quit ─────
   let pausedFromState = '';
   function pauseGame() {
-    if (state !== 'fight' && state !== 'countdown') return;
+    if (state !== 'fight' && state !== 'countdown' && state !== 'intro') return;
     pausedFromState = state;
     state = 'paused';
     stopMusic();
@@ -1329,7 +1337,7 @@
     showStart();
   }
   function syncMatchUI() {
-    const inMatch = state === 'fight' || state === 'countdown';
+    const inMatch = state === 'fight' || state === 'countdown' || state === 'intro';
     document.body.classList.toggle('in-match', inMatch);
   }
 
@@ -1516,8 +1524,9 @@
     shake = 0; hitPause = 0; slowMo = 0; slowMoTick = 0;
     countdownTime = COUNTDOWN_PHASE * 4;
     countdownLastPhase = -1;
+    introTimer = INTRO_FRAMES;
     document.getElementById('ko').classList.add('hidden');
-    state = 'countdown';
+    state = 'intro';
     startMusic();
   }
 
@@ -1525,6 +1534,15 @@
   function update() {
     readInputs();
     if (shake > 0) shake--;
+
+    if (state === 'intro') {
+      introTimer--;
+      if (introTimer <= 0) {
+        state = 'countdown';
+        countdownTime = COUNTDOWN_PHASE * 4;
+        countdownLastPhase = -1;
+      }
+    }
 
     if (state === 'countdown') {
       countdownTime--;
@@ -1537,7 +1555,7 @@
       if (countdownTime <= 0) state = 'fight';
     }
 
-    if (state !== 'fight' && state !== 'countdown') return;
+    if (state !== 'fight' && state !== 'countdown' && state !== 'intro') return;
 
     for (let i = 0; i < 2; i++) {
       const p = players[i], other = players[1 - i], inp = p.input;
@@ -2265,11 +2283,9 @@
   // with flat sprite fighters — would look like a glitch). The parallax
   // stars amplify the motion. Plays only during the first ~1.2s of countdown.
   function getIntroState() {
-    if (state !== 'countdown') return { panX: 0, panY: 0, zoomMul: 1 };
-    const elapsedFromStart = COUNTDOWN_PHASE * 4 - countdownTime;
-    const introFrames = COUNTDOWN_PHASE * 2.2;
-    if (elapsedFromStart >= introFrames) return { panX: 0, panY: 0, zoomMul: 1 };
-    const t = elapsedFromStart / introFrames;
+    if (state !== 'intro') return { panX: 0, panY: 0, zoomMul: 1 };
+    const elapsedFromStart = INTRO_FRAMES - introTimer;
+    const t = elapsedFromStart / INTRO_FRAMES;
     const eased = t * t * (3 - 2 * t); // smoothstep
     const damp = 1 - eased;
     return {

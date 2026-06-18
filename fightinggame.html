@@ -374,6 +374,13 @@
   </div>
 </div>
 
+<div id="bossIntro" class="overlay hidden" style="cursor:pointer;">
+  <div style="font-size:clamp(20px,3vw,28px); letter-spacing:3px; opacity:0.85; margin-bottom:6px;">⚠ BOSS BATTLE ⚠</div>
+  <h1 id="bossIntroName" style="font-size:clamp(50px,11vw,96px); margin-bottom:14px;"></h1>
+  <div id="bossIntroText" style="font-size:clamp(16px,2.5vw,22px); line-height:1.6; margin-bottom:32px; white-space:pre-line; max-width:600px;"></div>
+  <button id="bossIntroBtn">TAP TO BEGIN</button>
+</div>
+
 <script>
 (() => {
   const canvas = document.getElementById('game');
@@ -477,13 +484,22 @@
             voice:{ pitch:1.3, rate:1.05, taunts:["Yes!","Victory!","I did it!","Got 'em!"] }, pet:'heart' },
     dad:  { id:'dad',  name:'DAD',  color:'#4caf50', saberColor:'#b0ff90', skinColor:'#e3b388', hair:'short',
             voice:{ pitch:0.7, rate:0.95, taunts:["Booyah!","Oh yeah!","Got 'em!","Champion!"] }, pet:'frog' },
-    // Arcade boss — only appears as the final arcade opponent
-    alien:{ id:'alien', name:'ZORG', boss:true,
+    // Bosses — extra large, scary, with their own taunts
+    alien:{ id:'alien', name:'ZORG', boss:true, bossScale:1.5,
             color:'#7ac010', saberColor:'#aaff60', skinColor:'#9adc4a',
-            hair:'antennae', hairColor:'#5a8a10',
-            voice:{ pitch:0.5, rate:0.85, taunts:["You cannot defeat me!","Zorg wins!","Foolish human!","I am inevitable!"] }, pet:'ufo' },
+            hair:'antennae', hairColor:'#5a8a10', auraColor:'#aaff60',
+            voice:{ pitch:0.5, rate:0.85, taunts:["You cannot defeat me!","Zorg wins!","Foolish human!","I am inevitable!"] },
+            pet:'ufo',
+            intro:"FROM THE DEPTHS OF SPACE...\nZORG THE ALIEN ARRIVES!" },
+    skull:{ id:'skull', name:'GRIMM', boss:true, bossScale:1.55,
+            color:'#5a2a8a', saberColor:'#d088ff', skinColor:'#dccfe0',
+            hair:'short', hairColor:'#1a0a2a', auraColor:'#d088ff',
+            voice:{ pitch:0.45, rate:0.80, taunts:["Your bones... are mine!","Doom is here!","Grimm laughs at you!","No mortal can win!"] },
+            pet:'ufo',
+            intro:"A SHADOW FALLS OVER THE ARENA...\nGRIMM THE BONE LORD APPEARS!" },
   };
-  const FIGHTER_ORDER = ['ben', 'luke', 'mom', 'dad'];
+  const FIGHTER_ORDER = ['ben', 'luke', 'mom', 'dad', 'alien'];
+  const BOSS_ORDER = ['alien', 'skull']; // arcade rotates through these for the boss round
 
   // ───── arenas ─────
   const ARENAS = {
@@ -743,7 +759,8 @@
       color: '#888', saberColor: '#fff', skinColor: '#f3d0a8',
       hair: 'short', hairColor: null,
       name: '?', fighterId: null,
-      maxHp: MAX_HP, bossMode: false,
+      maxHp: MAX_HP, bossMode: false, scale: 1, auraColor: null,
+      ghost: false, ghostTime: 0,
       weapon: 'saber',
       cooldown: 0,
       saberSwing: 0, saberHit: false,
@@ -788,8 +805,12 @@
     p.hairColor = f.hairColor || f.color;
     p.name = f.name; p.fighterId = fighterId;
     p.bossMode = !!f.boss;
+    p.scale = f.bossScale || 1;
+    p.auraColor = f.auraColor || null;
     p.maxHp = p.bossMode ? Math.floor(MAX_HP * 1.3) : MAX_HP;
   }
+  function playerW(p) { return PLAYER_W * (p.scale || 1); }
+  function playerH(p) { return PLAYER_H * (p.scale || 1); }
 
   const projectiles   = [];
   const grenades      = [];
@@ -822,7 +843,8 @@
 
   let picks = [null, null];
   let pickStage = 0;
-  let meteorMode = false;
+  const METEOR_MODES = ['off', 'normal', 'ice'];
+  let meteorMode = 'off';   // 'off' | 'normal' | 'ice'
   let powerupTimer = 600;
   let meteorTimer = 180;
 
@@ -963,6 +985,14 @@
       kick: [1,0,0,1, 0,0,1,0, 1,0,0,1, 0,0,1,0],
       hat:  [0,1,0,1, 0,1,0,1, 0,1,0,1, 0,1,0,1],
     },
+    {
+      // Played only during boss fights — slow, ominous, minor key.
+      name: 'Boss Theme', bpm: 100, boss: true,
+      bass: [82,0,82,0, 73,0,82,0, 98,0,98,0, 65,0,82,82],
+      lead: [0,0,0,0, 0,0,659,0, 587,0,523,494, 440,0,659,0],
+      kick: [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,1,0],
+      hat:  [0,0,1,0, 0,1,1,0, 0,0,1,0, 0,1,1,0],
+    },
   ];
 
   let musicGain = null;
@@ -978,12 +1008,19 @@
     musicGain.gain.value = 0.16;
     musicGain.connect(audioCtx.destination);
   }
-  function startMusic() {
+  function startMusic(forBoss) {
     ensureAudio();
     if (!audioCtx) return;
     initMusic();
     stopMusic();
-    musicTrackIdx = Math.floor(Math.random() * TRACKS.length);
+    if (forBoss) {
+      const idx = TRACKS.findIndex(t => t.boss);
+      musicTrackIdx = idx >= 0 ? idx : 0;
+    } else {
+      // Random non-boss track
+      const nonBoss = TRACKS.map((t, i) => t.boss ? -1 : i).filter(i => i >= 0);
+      musicTrackIdx = nonBoss[Math.floor(Math.random() * nonBoss.length)];
+    }
     musicStep = 0;
     musicLoops = 0;
     musicNext = audioCtx.currentTime + 0.1;
@@ -1014,7 +1051,12 @@
         musicLoops++;
         if (musicLoops >= 6) {
           musicLoops = 0;
-          musicTrackIdx = (musicTrackIdx + 1) % TRACKS.length;
+          if (!track.boss) {
+            // rotate to next non-boss track
+            do { musicTrackIdx = (musicTrackIdx + 1) % TRACKS.length; }
+            while (TRACKS[musicTrackIdx].boss);
+          }
+          // boss track stays on itself the entire fight
         }
       }
     }
@@ -1164,7 +1206,7 @@
 
   // ───── damage routing ─────
   function dealDamage(attacker, victim, amount, attackerX) {
-    if (victim.ragdolling) return false;
+    if (victim.ragdolling || victim.ghost) return false;
     if (victim.invincibleTime > 0) return false;
     if (victim.ffTime > 0) {
       if (attacker !== victim) { sfx.block(); spawnHitSparks(victim.x + (attackerX > victim.x ? 30 : -30), GROUND + victim.yOff - PLAYER_H/2, victim.saberColor || '#fff'); }
@@ -1204,34 +1246,45 @@
     return true;
   }
 
-  // K.O. handler — ragdoll the loser, slow-mo, winner pose, voice, persistent score.
+  // K.O. handler — big explosion at the loser's position, body becomes a
+  // floating ghost that drifts up and fades. Slow-mo, winner pose, voice,
+  // persistent score, scheduled overlay.
   function triggerKO(loser) {
-    if (loser.ragdolling) return;
+    if (loser.ghost || loser.ragdolling) return;
     loser.hp = 0;
-    loser.ragdolling = true;
-    loser.vx = 0;  // stop running-leg animation during ragdoll
-    const winner = (loser === players[0]) ? players[1] : players[0];
-    const dirSign = (loser.x >= winner.x) ? 1 : -1;
-    loser.ragdollVx = dirSign * KNOCKBACK_VX;
-    loser.ragdollVy = KNOCKBACK_VY;
-    loser.ragdollAng = 0;
-    loser.ragdollSpin = 0.25 * dirSign;
+    loser.ghost = true;
+    loser.ghostTime = 120;
+    loser.vx = 0; loser.yVel = 0;
     loser.shielding = false;
     loser.laserTime = 0;
     loser.saberSwing = 0;
     loser.freezeBeamTime = 0;
+    loser.boomerangActive = false;
+    loser.mineActive = false;
+    const winner = (loser === players[0]) ? players[1] : players[0];
     winner.winPose = true;
     winner.winPoseTime = 90;
+
+    // Big death explosion at the loser's center
+    const koCenterY = GROUND + loser.yOff - PLAYER_H * (loser.scale || 1) / 2;
+    explosions.push({ x: loser.x, y: koCenterY, time: 30, max: 30, radius: 90 });
+    for (let i = 0; i < 28; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = 3 + Math.random() * 6;
+      const col = ['#ffe066','#ff9933','#ffffff','#ff5252'][i % 4];
+      spawnParticle(loser.x, koCenterY, Math.cos(a) * s, Math.sin(a) * s - 1, col, 50, 5);
+    }
+    sfx.boom();
+
     slowMo = KO_SLOWMO_FRAMES;
     slowMoTick = 0;
     shake = 32;
     sfx.ko();
-    if (winner.fighterId && !winner.bossMode && !winner.isAI) {
+    if (winner.fighterId && !winner.isAI) {
       scores[winner.fighterId] = (scores[winner.fighterId] || 0) + 1;
       saveScores();
     }
     speakVoice(winner.fighterId);
-    // schedule overlay after the slow-mo finishes — track id so we can cancel
     if (koTimeoutId) clearTimeout(koTimeoutId);
     koTimeoutId = setTimeout(() => onKOComplete(winner, loser), 1200);
   }
@@ -1337,7 +1390,7 @@
     state = 'arena';
   }
   function hideAllOverlays() {
-    ['start','mode','select','arena','ko','arcade','pause'].forEach(id => {
+    ['start','mode','select','arena','ko','arcade','pause','bossIntro'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.classList.add('hidden');
     });
@@ -1386,8 +1439,10 @@
     introTimer = 0; countdownTime = 0; roundTimer = 0;
     shake = 0;
     if (koTimeoutId) { clearTimeout(koTimeoutId); koTimeoutId = null; }
+    if (bossIntroTimeout) { clearTimeout(bossIntroTimeout); bossIntroTimeout = null; }
     for (const p of players) {
-      p.ragdolling = false; p.winPose = false; p.winPoseTime = 0;
+      p.ragdolling = false; p.ghost = false; p.ghostTime = 0;
+      p.winPose = false; p.winPoseTime = 0;
       p.flash = 0; p.mechTime = 0;
       p.invincibleTime = 0; p.doubleDamageTime = 0; p.speedTime = 0;
       p.frozenTime = 0;
@@ -1405,7 +1460,8 @@
 
   function beginMatch() {
     if (mode === 'arcade') {
-      const choices = FIGHTER_ORDER.filter(id => id !== picks[0]);
+      // Filter out alien — bosses only show up in the final round of the ladder
+      const choices = FIGHTER_ORDER.filter(id => id !== picks[0] && id !== 'alien');
       picks[1] = choices[Math.floor(Math.random() * choices.length)];
     }
     applyFighter(0, picks[0]);
@@ -1489,10 +1545,14 @@
     const nextRound = arcadeStage; // arcadeStage was already incremented before this call
     const isBossNext = (nextRound === ARCADE_TOTAL - 1);
     if (isBossNext) {
+      // Predict which boss will spawn next (matches arcadeAdvance logic)
+      const nextBossId = BOSS_ORDER[(scores.bossesFaced || 0) % BOSS_ORDER.length];
+      const nextBoss = FIGHTERS[nextBossId];
+      const color = nextBoss.auraColor || '#aaff60';
       txt.innerHTML =
         `<span style="color:${winner.color}">${winner.name}</span> wins round ${nextRound}!<br><br>` +
-        `<span style="color:#aaff60; font-size:1.2em; letter-spacing:2px;">⚠ BOSS BATTLE ⚠</span><br>` +
-        `<span style="color:#aaff60; font-size:1.05em;">ZORG THE ALIEN APPROACHES!</span>`;
+        `<span style="color:${color}; font-size:1.2em; letter-spacing:2px;">⚠ BOSS BATTLE ⚠</span><br>` +
+        `<span style="color:${color}; font-size:1.05em;">${nextBoss.name} APPROACHES!</span>`;
       document.getElementById('arcadeNextBtn').textContent = 'FACE THE BOSS';
     } else {
       txt.innerHTML =
@@ -1510,7 +1570,7 @@
     if (playerWon) {
       txt.innerHTML =
         `<span style="color:${winner.color}">${winner.name}</span><br>` +
-        `<span style="font-size:1.3em;">DEFEATED ZORG!</span><br>` +
+        `<span style="font-size:1.3em;">DEFEATED <span style="color:${loser.color}">${loser.name}</span>!</span><br>` +
         `<span style="font-size:0.85em; opacity:0.85;">arcade champion</span>`;
       document.getElementById('arcadeRetryBtn').classList.add('hidden');
     } else {
@@ -1540,13 +1600,44 @@
     document.getElementById('arcade').classList.add('hidden');
     const isBossRound = (arcadeStage === ARCADE_TOTAL - 1);
     if (isBossRound) {
-      picks[1] = 'alien';
-    } else {
-      const idChoices = FIGHTER_ORDER.filter(id => id !== picks[0]);
-      picks[1] = idChoices[arcadeStage % idChoices.length];
+      // Rotate through the boss roster across arcade runs
+      const bossIdx = (scores.bossesFaced || 0) % BOSS_ORDER.length;
+      picks[1] = BOSS_ORDER[bossIdx];
+      scores.bossesFaced = (scores.bossesFaced || 0) + 1;
+      saveScores();
+      applyFighter(1, picks[1]);
+      aiDifficulty = 2;
+      showBossIntro(picks[1]);
+      return;  // showBossIntro will resetForFight after tap/auto-skip
     }
+    // Skip Zorg + the player's own pick from the normal rotation
+    const idChoices = FIGHTER_ORDER.filter(id => id !== picks[0] && id !== 'alien');
+    picks[1] = idChoices[arcadeStage % idChoices.length];
     applyFighter(1, picks[1]);
-    aiDifficulty = isBossRound ? 2 : Math.min(2, Math.floor(arcadeStage / 2));
+    aiDifficulty = Math.min(2, Math.floor(arcadeStage / 2));
+    resetForFight(true);
+  }
+
+  // Boss intro cutscene — brief, skippable
+  let bossIntroTimeout = null;
+  function showBossIntro(bossId) {
+    const boss = FIGHTERS[bossId];
+    const nameEl = document.getElementById('bossIntroName');
+    const txtEl  = document.getElementById('bossIntroText');
+    nameEl.textContent = boss.name;
+    nameEl.style.color = boss.color;
+    txtEl.textContent = boss.intro || 'A FEARSOME BOSS APPEARS!';
+    hideAllOverlays();
+    document.getElementById('bossIntro').classList.remove('hidden');
+    state = 'boss-intro';
+    speakVoice(bossId);
+    if (bossIntroTimeout) clearTimeout(bossIntroTimeout);
+    bossIntroTimeout = setTimeout(skipBossIntro, 4500);
+  }
+  function skipBossIntro() {
+    if (state !== 'boss-intro') return;
+    if (bossIntroTimeout) { clearTimeout(bossIntroTimeout); bossIntroTimeout = null; }
+    document.getElementById('bossIntro').classList.add('hidden');
     resetForFight(true);
   }
   function arcadeFinish() {
@@ -1574,6 +1665,7 @@
       p.mineActive = false; p.boomerangActive = false;
       p.combo = 0; p.comboTimer = 0;
       p.ragdolling = false; p.ragdollVx = 0; p.ragdollVy = 0; p.ragdollAng = 0; p.ragdollSpin = 0;
+      p.ghost = false; p.ghostTime = 0;
       p.winPose = false; p.winPoseTime = 0;
       p.aiTick = 0; p.aiAction = 'approach';
       p.aiAttackPulse = 0; p.aiJumpPulse = 0; p.aiSwitchPulse = 0; p.aiWantSwitch = false;
@@ -1601,7 +1693,8 @@
     introTimer = INTRO_FRAMES;
     document.getElementById('ko').classList.add('hidden');
     state = 'intro';
-    startMusic();
+    const isBossFight = players.some(p => p.bossMode);
+    startMusic(isBossFight);
   }
 
   // ───── update ─────
@@ -1637,22 +1730,10 @@
       // Combo decay (flash decay happens once below with the other timers)
       if (p.comboTimer > 0) { p.comboTimer--; if (p.comboTimer === 0) p.combo = 0; }
 
-      // Ragdoll mode: physics only
-      if (p.ragdolling) {
-        p.x += p.ragdollVx;
-        p.ragdollVx *= 0.96;
-        p.yOff += p.ragdollVy;
-        p.ragdollVy += GRAVITY * 0.55;
-        p.ragdollAng += p.ragdollSpin;
-        p.x = Math.max(PLAYER_W/2 + 4, Math.min(VW - PLAYER_W/2 - 4, p.x));
-        if (p.yOff > 0) {
-          p.yOff = 0;
-          if (p.ragdollVy > 5) { spawnDust(p.x, GROUND); shake = Math.max(shake, 6); }
-          p.ragdollVy *= -0.3;
-          if (Math.abs(p.ragdollVy) < 1) p.ragdollVy = 0;
-          p.ragdollSpin *= 0.6;
-          if (Math.abs(p.ragdollSpin) < 0.04) p.ragdollSpin = 0;
-        }
+      // Ghost mode (post-KO): drift up + fade
+      if (p.ghost) {
+        if (p.ghostTime > 0) p.ghostTime--;
+        p.yOff -= 0.55;
         continue;
       }
 
@@ -1954,7 +2035,7 @@
 
     updateHazards();
 
-    if (meteorMode) {
+    if (meteorMode !== 'off') {
       meteorTimer--;
       if (meteorTimer <= 0) {
         spawnMeteor();
@@ -1973,8 +2054,22 @@
       } else {
         m.y += m.vy;
         if (m.y >= GROUND) {
-          explodeAt(m.targetX, GROUND - 4, METEOR_RADIUS, METEOR_DAMAGE, null);
-          shake = Math.max(shake, 16);
+          if (m.kind === 'ice') {
+            // Ice meteor: lighter damage but freezes anyone in the blast
+            explodeAt(m.targetX, GROUND - 4, METEOR_RADIUS, 6, null);
+            for (const pp of players) {
+              if (pp.ragdolling || pp.ghost) continue;
+              const dx = pp.x - m.targetX;
+              const dyy = (GROUND + pp.yOff) - GROUND;
+              if (dx*dx + dyy*dyy < METEOR_RADIUS * METEOR_RADIUS) {
+                pp.frozenTime = Math.max(pp.frozenTime, 140);
+                spawnSparkles(pp.x, GROUND + pp.yOff - PLAYER_H/2, '#aae6ff');
+              }
+            }
+          } else {
+            explodeAt(m.targetX, GROUND - 4, METEOR_RADIUS, METEOR_DAMAGE, null);
+          }
+          shake = Math.max(shake, 26);   // bigger ground shake on impact
           meteors.splice(i, 1);
         }
       }
@@ -2008,7 +2103,7 @@
       }
       b.x += b.vx; b.y += b.vy; b.spin += 0.45;
       const target = players[1 - b.owner];
-      if (!target.ragdolling &&
+      if (!target.ragdolling && !target.ghost &&
           Math.abs(b.x - target.x) < PLAYER_W/2 + 8 &&
           Math.abs(b.y - (GROUND + target.yOff - PLAYER_H/2)) < PLAYER_H/2 + 4) {
         if (dealDamage(players[b.owner], target, BOOMERANG_DAMAGE, b.x)) sfx.hit();
@@ -2027,7 +2122,7 @@
         if (m.armDelay <= 0) { m.armed = true; sfx.mineArm(); }
       } else {
         const target = players[1 - m.owner];
-        if (!target.ragdolling) {
+        if (!target.ragdolling && !target.ghost) {
           const dx = target.x - m.x;
           const dy = (GROUND + target.yOff) - m.y;
           if (dx*dx + dy*dy < MINE_RADIUS * MINE_RADIUS) {
@@ -2051,7 +2146,7 @@
       ic.vy += 0.18;
       let hit = false;
       for (const pp of players) {
-        if (pp.ragdolling) continue;
+        if (pp.ragdolling || pp.ghost) continue;
         if (Math.abs(pp.x - ic.x) < PLAYER_W/2 + 6 &&
             ic.y > (GROUND + pp.yOff - PLAYER_H) &&
             ic.y < (GROUND + pp.yOff + 4)) {
@@ -2094,7 +2189,7 @@
 
     // ── K.O. detection (only once per player) ──
     for (const p of players) {
-      if (p.hp <= 0 && !p.ragdolling) {
+      if (p.hp <= 0 && !p.ragdolling && !p.ghost) {
         triggerKO(p);
         break;
       }
@@ -2108,7 +2203,7 @@
         if (haz.cooldown <= 0) {
           haz.cooldown = haz.period;
           for (const p of players) {
-            if (p.ragdolling) continue;
+            if (p.ragdolling || p.ghost) continue;
             if (p.x > haz.x && p.x < haz.x + haz.w && p.yOff >= -2) {
               dealDamage(null, p, haz.damage, p.x);
               spawnHitSparks(p.x, GROUND, '#ff5500');
@@ -2123,7 +2218,7 @@
         }
       } else if (haz.type === 'bounce') {
         for (const p of players) {
-          if (p.ragdolling) continue;
+          if (p.ragdolling || p.ghost) continue;
           if (p.x > haz.x && p.x < haz.x + haz.w && p.yOff >= -3 && p.yVel >= -0.5) {
             p.yVel = haz.force;
             spawnSparkles(p.x, GROUND, '#9fff90');
@@ -2323,7 +2418,13 @@
     mysteryBoxes.push({ x: 100 + Math.random() * (VW - 200), y: -30, vy: 0, rotation: 0, landed: false });
   }
   function spawnMeteor() {
-    meteors.push({ targetX: 80 + Math.random() * (VW - 160), telegraph: METEOR_TELEGRAPH, falling: false, x: 0, y: -40, vy: 0 });
+    meteors.push({
+      targetX: 80 + Math.random() * (VW - 160),
+      telegraph: METEOR_TELEGRAPH,
+      falling: false,
+      x: 0, y: -40, vy: 0,
+      kind: meteorMode,   // 'normal' or 'ice'
+    });
     sfx.meteorWarn();
   }
   function applyPowerup(p, b) {
@@ -2476,13 +2577,44 @@
     ctx.beginPath(); ctx.ellipse(p.x, GROUND + 2, w/2, 4.5, 0, 0, Math.PI * 2); ctx.fill();
   }
 
+  function drawGhost(p) {
+    const t = Math.max(0, p.ghostTime / 120);
+    const alpha = t * 0.7;
+    const wobble = Math.sin(Date.now() / 220) * 4;
+    const cy = GROUND + p.yOff - PLAYER_H/2 + wobble;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.shadowBlur = 20; ctx.shadowColor = '#cce6ff';
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(p.x, cy, 16, Math.PI, 2 * Math.PI);
+    ctx.lineTo(p.x + 16, cy + 18);
+    const waves = 4;
+    for (let i = 0; i < waves; i++) {
+      const sx = p.x + 16 - (i / waves) * 32;
+      const ex = p.x + 16 - ((i + 1) / waves) * 32;
+      ctx.quadraticCurveTo((sx + ex) / 2, cy + 26, ex, cy + 18);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#1a1a3a';
+    ctx.beginPath(); ctx.arc(p.x - 5, cy - 2, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(p.x + 5, cy - 2, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#1a1a3a'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(p.x, cy + 4, 2.2, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
   function drawPlayer(p) {
     if (!p.fighterId) return;
+    if (p.ghost) { drawGhost(p); return; }
 
     const flip = p.flipping;
     const mech = p.mechTime > 0;
     const boss = p.bossMode;
-    const sizeScale = mech ? 1.7 : (boss ? 1.22 : 1);
+    const baseScale = p.scale || 1;
+    const sizeScale = mech ? 1.7 * baseScale : baseScale;
     const rotating = flip || p.ragdolling;
     const angle = p.ragdolling ? p.ragdollAng : (flip ? p.flipPhase : 0);
     const pivotY = GROUND + p.yOff - PLAYER_H/2;
@@ -2657,13 +2789,14 @@
       ctx.restore();
     }
 
-    // Boss alien aura (when not also in mech)
+    // Boss aura (when not also in mech)
     if (boss && !mech) {
+      const aura = p.auraColor || '#aaff60';
       ctx.save();
       const pulse = Math.sin(Date.now() / 220) * 0.18 + 0.7;
       ctx.globalAlpha = pulse;
-      ctx.strokeStyle = '#aaff60';
-      ctx.shadowBlur = 20; ctx.shadowColor = '#aaff60';
+      ctx.strokeStyle = aura;
+      ctx.shadowBlur = 20; ctx.shadowColor = aura;
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.ellipse(p.x, bodyCenterY, PLAYER_W * sizeScale * 0.6, PLAYER_H * sizeScale * 0.58, 0, 0, Math.PI * 2);
@@ -2929,21 +3062,41 @@
     ctx.restore();
   }
   function drawMeteor(m) {
+    const isIce = m.kind === 'ice';
+    const telegraphColor = isIce ? '#5fb8ff' : '#ff3030';
+    const arrowColor     = isIce ? '#7fdcff' : '#ff5050';
     if (!m.falling) {
       const pulse = Math.sin(m.telegraph * 0.5) * 0.4 + 0.7;
       ctx.save();
       ctx.globalAlpha = pulse;
-      ctx.strokeStyle = '#ff3030'; ctx.lineWidth = 3;
+      ctx.strokeStyle = telegraphColor; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.ellipse(m.targetX, GROUND, METEOR_RADIUS, 12, 0, 0, Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = '#ff3030'; ctx.globalAlpha = pulse * 0.2;
+      ctx.fillStyle = telegraphColor; ctx.globalAlpha = pulse * 0.2;
       ctx.beginPath(); ctx.ellipse(m.targetX, GROUND, METEOR_RADIUS, 12, 0, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = pulse;
-      ctx.fillStyle = '#ff5050';
+      ctx.fillStyle = arrowColor;
       ctx.beginPath();
       ctx.moveTo(m.targetX, GROUND - 30);
       ctx.lineTo(m.targetX - 7, GROUND - 42);
       ctx.lineTo(m.targetX + 7, GROUND - 42);
       ctx.closePath(); ctx.fill();
+      ctx.restore();
+    } else if (isIce) {
+      ctx.save();
+      ctx.shadowBlur = 24; ctx.shadowColor = '#aae6ff';
+      ctx.strokeStyle = 'rgba(140,220,255,0.6)';
+      ctx.lineWidth = 9; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(m.x, m.y - 10);
+      ctx.lineTo(m.x - (m.x - m.targetX) * 0.3, m.y - 60);
+      ctx.stroke();
+      ctx.fillStyle = '#3aa0d0';
+      ctx.beginPath(); ctx.arc(m.x, m.y, 14, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#aae6ff';
+      ctx.beginPath(); ctx.arc(m.x - 3, m.y - 3, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(m.x - 4, m.y - 4, 3, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
     } else {
       ctx.save();
@@ -3214,7 +3367,7 @@
     // Bottom row: music + meteors
     let info = [];
     if (musicSched) info.push('♪ ' + TRACKS[musicTrackIdx].name);
-    if (meteorMode) info.push('☄ METEORS');
+    if (meteorMode !== 'off') info.push(meteorMode === 'ice' ? '❄ ICE METEORS' : '☄ METEORS');
     if (info.length) {
       ctx.fillStyle = '#ffb24d';
       ctx.font = 'bold 11px -apple-system, system-ui, sans-serif';
@@ -3354,15 +3507,27 @@
   document.getElementById('resumeBtn').addEventListener('click', resumeGame);
   document.getElementById('quitBtn').addEventListener('click', quitMatch);
 
-  // Meteor toggles (both versions stay in sync)
+  // Boss intro — tap anywhere on the overlay (or the button) to skip
+  document.getElementById('bossIntro').addEventListener('click', skipBossIntro);
+  document.getElementById('bossIntroBtn').addEventListener('click', e => { e.stopPropagation(); skipBossIntro(); });
+
+  // Meteor toggles (both versions stay in sync) — cycles OFF → NORMAL → ICE
   function syncMeteorToggle() {
     [document.getElementById('meteorToggle'), document.getElementById('meteorToggle2')].forEach(b => {
       if (!b) return;
-      b.textContent = 'METEOR MODE: ' + (meteorMode ? 'ON' : 'OFF');
-      b.classList.toggle('on', meteorMode);
+      const label = meteorMode === 'off' ? 'METEORS: OFF'
+                  : meteorMode === 'ice' ? '❄ ICE METEORS'
+                  : '☄ METEORS';
+      b.textContent = label;
+      b.classList.toggle('on', meteorMode !== 'off');
     });
   }
-  function toggleMeteor() { meteorMode = !meteorMode; syncMeteorToggle(); sfx.switch(); }
+  function toggleMeteor() {
+    const i = METEOR_MODES.indexOf(meteorMode);
+    meteorMode = METEOR_MODES[(i + 1) % METEOR_MODES.length];
+    syncMeteorToggle();
+    sfx.switch();
+  }
   const mb1 = document.getElementById('meteorToggle');
   const mb2 = document.getElementById('meteorToggle2');
   if (mb1) mb1.addEventListener('click', toggleMeteor);

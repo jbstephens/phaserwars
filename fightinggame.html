@@ -4287,10 +4287,12 @@
     setTimeout(tickCameraScan, 150);
   }
   function stopCameraScan() {
+    if (!camActive && !camStream) return;   // nothing to clean up
     camActive = false;
     camCancelled = true;
     camDetector = null;
-    document.getElementById('netCamera').classList.add('hidden');
+    const camEl = document.getElementById('netCamera');
+    if (camEl) camEl.classList.add('hidden');
     if (camStream) {
       camStream.getTracks().forEach(t => t.stop());
       camStream = null;

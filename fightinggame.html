@@ -436,51 +436,45 @@
   </div>
 
   <!-- HOST PANEL -->
-  <div id="netHostPanel" class="hidden" style="max-width:560px;">
-    <div style="font-size:14px;margin-bottom:10px;"><b>Step 1.</b> Show this code to the other iPad's camera.</div>
-    <canvas id="netHostQr" style="background:#fff;border-radius:10px;padding:10px;display:block;margin:0 auto;width:280px;height:280px;"></canvas>
-    <div style="margin-top:14px;font-size:14px;"><b>Step 2.</b> When they show their code, tap SCAN.</div>
-    <button id="netHostScanBtn" style="margin-top:6px;">📷 SCAN THEIR CODE</button>
-    <details class="net-fallback" style="margin-top:18px;text-align:left;">
-      <summary style="opacity:0.7;font-size:12px;cursor:pointer;">No camera? Paste codes manually</summary>
-      <div style="font-size:11px;opacity:0.7;margin:6px 0;">copy this and send via iMessage / AirDrop:</div>
-      <textarea id="netHostCode" readonly style="width:100%;height:70px;font-family:monospace;font-size:10px;padding:6px;border-radius:6px;background:#111;color:#9aff70;border:1px solid #444;"></textarea>
-      <button id="netCopyHost" class="secondary" style="margin-top:4px;">COPY HOST CODE</button>
-      <div style="font-size:11px;opacity:0.7;margin:10px 0 4px;">paste their answer here:</div>
-      <textarea id="netHostAnswerIn" placeholder="paste guest's answer code…" style="width:100%;height:70px;font-family:monospace;font-size:10px;padding:6px;border-radius:6px;background:#111;color:#fff;border:1px solid #444;"></textarea>
-      <button id="netHostAcceptBtn" class="secondary">CONNECT WITH CODE</button>
+  <div id="netHostPanel" class="hidden" style="max-width:520px;">
+    <div style="font-size:15px;margin:6px 0 8px;"><b>Step 1.</b> Send your code to the other iPad.</div>
+    <button id="netShareHost">📤 SHARE MY CODE</button>
+    <div style="font-size:11px;opacity:0.6;margin:6px 0;">Opens iMessage / AirDrop / Mail</div>
+
+    <div style="font-size:15px;margin:22px 0 8px;"><b>Step 2.</b> When they reply with their code, tap this:</div>
+    <button id="netPasteAnswer">📋 PASTE &amp; CONNECT</button>
+
+    <details class="net-fallback" style="margin-top:22px;text-align:left;">
+      <summary style="opacity:0.6;font-size:12px;cursor:pointer;">Manual paste fallback</summary>
+      <textarea id="netHostCode" readonly style="width:100%;height:60px;font-family:monospace;font-size:10px;padding:6px;border-radius:6px;background:#111;color:#9aff70;border:1px solid #444;margin-top:6px;"></textarea>
+      <button id="netCopyHost" class="secondary">COPY</button>
+      <textarea id="netHostAnswerIn" placeholder="paste their reply here" style="width:100%;height:60px;font-family:monospace;font-size:10px;padding:6px;border-radius:6px;background:#111;color:#fff;border:1px solid #444;margin-top:10px;"></textarea>
+      <button id="netHostAcceptBtn" class="secondary">CONNECT</button>
     </details>
   </div>
 
   <!-- GUEST PANEL -->
-  <div id="netJoinPanel" class="hidden" style="max-width:560px;">
-    <div style="font-size:14px;margin-bottom:10px;"><b>Step 1.</b> Tap SCAN, then point your camera at the host's QR code.</div>
-    <button id="netJoinScanBtn">📷 SCAN HOST CODE</button>
-    <div id="netJoinAnswerWrap" class="hidden" style="margin-top:18px;">
-      <div style="font-size:14px;margin-bottom:10px;"><b>Step 2.</b> Show this back to the host.</div>
-      <canvas id="netJoinQr" style="background:#fff;border-radius:10px;padding:10px;display:block;margin:0 auto;width:280px;height:280px;"></canvas>
-      <div style="margin-top:10px;opacity:0.7;font-size:12px;">waiting for host to scan…</div>
+  <div id="netJoinPanel" class="hidden" style="max-width:520px;">
+    <div style="font-size:15px;margin:6px 0 8px;"><b>Step 1.</b> Copy the host's code from iMessage, then tap this:</div>
+    <button id="netPasteOffer">📋 PASTE HOST CODE</button>
+
+    <div id="netJoinAnswerWrap" class="hidden">
+      <div style="font-size:15px;margin:22px 0 8px;"><b>Step 2.</b> Send your reply back to the host.</div>
+      <button id="netShareGuest">📤 SHARE MY REPLY</button>
+      <div style="opacity:0.7;font-size:12px;margin-top:10px;">waiting for host to connect…</div>
     </div>
-    <details class="net-fallback" style="margin-top:18px;text-align:left;">
-      <summary style="opacity:0.7;font-size:12px;cursor:pointer;">No camera? Paste codes manually</summary>
-      <div style="font-size:11px;opacity:0.7;margin:6px 0;">paste the host's code:</div>
-      <textarea id="netJoinOfferIn" placeholder="paste host code…" style="width:100%;height:70px;font-family:monospace;font-size:10px;padding:6px;border-radius:6px;background:#111;color:#fff;border:1px solid #444;"></textarea>
+
+    <details class="net-fallback" style="margin-top:22px;text-align:left;">
+      <summary style="opacity:0.6;font-size:12px;cursor:pointer;">Manual paste fallback</summary>
+      <textarea id="netJoinOfferIn" placeholder="paste host code" style="width:100%;height:60px;font-family:monospace;font-size:10px;padding:6px;border-radius:6px;background:#111;color:#fff;border:1px solid #444;margin-top:6px;"></textarea>
       <button id="netJoinAcceptBtn" class="secondary">NEXT</button>
-      <div style="font-size:11px;opacity:0.7;margin:10px 0 4px;">copy this answer back:</div>
-      <textarea id="netJoinAnswerOut" readonly style="width:100%;height:70px;font-family:monospace;font-size:10px;padding:6px;border-radius:6px;background:#111;color:#9aff70;border:1px solid #444;"></textarea>
-      <button id="netCopyAnswer" class="secondary">COPY ANSWER CODE</button>
+      <textarea id="netJoinAnswerOut" readonly style="width:100%;height:60px;font-family:monospace;font-size:10px;padding:6px;border-radius:6px;background:#111;color:#9aff70;border:1px solid #444;margin-top:10px;"></textarea>
+      <button id="netCopyAnswer" class="secondary">COPY</button>
     </details>
   </div>
 
   <div id="netStatus" style="margin-top:14px;min-height:18px;font-size:12px;opacity:0.85;"></div>
   <button id="netBackBtn" class="secondary" style="margin-top:14px;">&larr; back</button>
-</div>
-
-<!-- Camera viewfinder (full-screen, shown while scanning) -->
-<div id="netCamera" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.96);z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;">
-  <video id="netVideo" autoplay playsinline muted style="max-width:90vw;max-height:65vh;border-radius:10px;background:#000;"></video>
-  <div id="netCamHint" style="margin-top:14px;font-size:15px;text-align:center;">Point your iPad at the other player's QR code</div>
-  <button id="netCameraCancelBtn" class="secondary" style="margin-top:14px;">CANCEL</button>
 </div>
 
 <div id="bossIntro" class="overlay hidden" style="cursor:pointer;">
@@ -4313,6 +4307,7 @@
   let netDC = null;
   let netConnected = false;
   let netStateTick = 0;
+  let netLocalCode = '';           // our own offer or answer once generated
   const NET_SEND_INTERVAL = 2;     // send every 2 frames (≈30Hz)
 
   function netStatus(s, ok) {
@@ -4339,6 +4334,7 @@
     if (netPeer) { try { netPeer.close(); } catch(_){} netPeer = null; }
     netConnected = false;
     netMode = 'solo';
+    netLocalCode = '';
     document.body.classList.remove('net-host', 'net-guest');
   }
 
@@ -4360,14 +4356,9 @@
     netStatus('Gathering connection info…');
     await waitForIceGathering(netPeer);
     const code = encodeSdp(netPeer.localDescription);
+    netLocalCode = code;
     document.getElementById('netHostCode').value = code;
-    // Render the QR for the camera flow
-    try {
-      qrToCanvas(qrEncode(code), document.getElementById('netHostQr'), 5);
-    } catch (e) {
-      netStatus('QR generation failed (' + e.message + ') — use the paste fallback.', false);
-    }
-    netStatus('Show the QR to your friend, then tap SCAN when they show theirs.');
+    netStatus('Tap SHARE MY CODE to send it to the other iPad.');
   }
 
   async function netAcceptAnswer(answerStr) {
@@ -4406,14 +4397,10 @@
     netStatus('Generating answer…');
     await waitForIceGathering(netPeer);
     const code = encodeSdp(netPeer.localDescription);
+    netLocalCode = code;
     document.getElementById('netJoinAnswerOut').value = code;
-    try {
-      qrToCanvas(qrEncode(code), document.getElementById('netJoinQr'), 5);
-    } catch (e) {
-      netStatus('QR generation failed (' + e.message + ') — use the paste fallback.', false);
-    }
     document.getElementById('netJoinAnswerWrap').classList.remove('hidden');
-    netStatus('Show your QR to the host. Waiting for them to scan…');
+    netStatus('Tap SHARE MY REPLY to send it back to the host.');
     return true;
   }
 
@@ -4682,20 +4669,58 @@
     showMode();
   });
 
-  // QR scan buttons
-  document.getElementById('netHostScanBtn').addEventListener('click', () => {
-    startCameraScan(async (raw) => {
-      netStatus('Got the answer code, connecting…', true);
-      await netAcceptAnswer(raw);
-    });
+  // ── Share + Paste buttons (the native flow) ──
+  async function shareLocalCode(intro) {
+    if (!netLocalCode) {
+      netStatus('Code not ready yet — wait a second.', false);
+      return;
+    }
+    const text = intro + '\n\n' + netLocalCode;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Phaser Wars', text });
+        netStatus('Sent!', true);
+        return;
+      } catch (e) {
+        if (e && e.name === 'AbortError') { netStatus(''); return; } // user cancelled
+      }
+    }
+    // No share API — fall back to clipboard copy
+    const ok = await copyToClipboard(netLocalCode);
+    netStatus(ok ? 'Code copied — paste it into iMessage.' : 'Couldn\'t share or copy. Use manual paste below.', ok);
+  }
+  async function pasteRemoteCode(handler, label) {
+    let text = '';
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        text = await navigator.clipboard.readText();
+      }
+    } catch (e) {
+      netStatus('iPad blocked the paste. Try again, or use manual paste below.', false);
+      return;
+    }
+    text = (text || '').trim();
+    if (!text) {
+      netStatus('Clipboard is empty. Copy the code from iMessage first.', false);
+      return;
+    }
+    // The shared message may include a preface like "Phaser Wars code:" — extract the last line that looks like a code
+    const codeLine = text.split('\n').map(s => s.trim()).filter(Boolean).pop() || text;
+    netStatus(label + '…');
+    await handler(codeLine);
+  }
+  document.getElementById('netShareHost').addEventListener('click', () => {
+    shareLocalCode('Phaser Wars — paste this back to the host iPad:');
   });
-  document.getElementById('netJoinScanBtn').addEventListener('click', () => {
-    startCameraScan(async (raw) => {
-      netStatus('Got the host code, generating answer…', true);
-      await netStartGuest(raw);
-    });
+  document.getElementById('netShareGuest').addEventListener('click', () => {
+    shareLocalCode('Phaser Wars — paste this back to the host iPad:');
   });
-  document.getElementById('netCameraCancelBtn').addEventListener('click', stopCameraScan);
+  document.getElementById('netPasteAnswer').addEventListener('click', () => {
+    pasteRemoteCode(netAcceptAnswer, 'Connecting');
+  });
+  document.getElementById('netPasteOffer').addEventListener('click', () => {
+    pasteRemoteCode(netStartGuest, 'Generating reply');
+  });
   document.getElementById('modeBackBtn').addEventListener('click', showStart);
   document.querySelectorAll('.diff-btn').forEach(btn => {
     btn.addEventListener('click', () => {

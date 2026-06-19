@@ -3999,9 +3999,9 @@
       // a=candidate:1 1 udp PRIORITY IP PORT typ TYPE …
       if (parts[2] !== 'udp') continue;
       const ip = parts[4], port = parts[5];
-      // Skip IPv6 and mDNS (.local) for QR compactness; host candidates only
+      // Skip IPv6 only — iPad Safari emits ONLY mDNS (.local) host candidates by
+      // default for privacy, so we MUST keep them or the candidate list is empty.
       if (ip.includes(':')) continue;
-      if (ip.endsWith('.local')) continue;
       const ti = parts.indexOf('typ');
       const candType = ti >= 0 ? parts[ti + 1] : 'host';
       if (candType !== 'host') continue;
@@ -4011,13 +4011,14 @@
   }
   function sdpExpand(packed) {
     const [t, ufrag, pwd, fp, setupChar, candStr] = packed.split('|');
+    if (!ufrag || !pwd || !fp || fp.length !== 64) throw new Error('Malformed code');
     const type = (t === 'o') ? 'offer' : 'answer';
     const setup = setupChar === 'a' ? 'active' : setupChar === 'p' ? 'passive' : 'actpass';
-    const colonFp = (fp || '').match(/.{2}/g).join(':');
+    const colonFp = (fp.match(/.{2}/g) || []).join(':');
     const cands = (candStr || '').split(',').filter(Boolean);
     const lines = [
       'v=0',
-      'o=- 1 2 IN IP4 127.0.0.1',
+      `o=- ${Date.now()} 2 IN IP4 127.0.0.1`,
       's=-',
       't=0 0',
       'a=group:BUNDLE 0',
@@ -4026,7 +4027,6 @@
       'c=IN IP4 0.0.0.0',
       'a=ice-ufrag:' + ufrag,
       'a=ice-pwd:' + pwd,
-      'a=ice-options:trickle',
       'a=fingerprint:sha-256 ' + colonFp,
       'a=setup:' + setup,
       'a=mid:0',
@@ -4034,7 +4034,9 @@
       'a=max-message-size:262144',
     ];
     for (const c of cands) {
-      const [ip, port] = c.split(':');
+      // c is "host:port" — keep mDNS hostnames verbatim, the peer will resolve them
+      const lastColon = c.lastIndexOf(':');
+      const ip = c.slice(0, lastColon), port = c.slice(lastColon + 1);
       lines.push(`a=candidate:1 1 udp 2122260223 ${ip} ${port} typ host generation 0`);
     }
     lines.push('a=end-of-candidates');
@@ -4207,17 +4209,18 @@
     m[7][8] = bit(8) === 1;
     for (let i = 0; i <= 5; i++) m[5 - i][8] = bit(9 + i) === 1;    // bits 9..14
     // Secondary location: bottom-left column + top-right row
-    for (let i = 0; i <= 6; i++) m[SIZE - 1 - i][8] = bit(i) === 1; // bits 0..6
-    for (let i = 0; i <= 7; i++) m[8][SIZE - 8 + i] = bit(14 - i) === 1; // bits 14..7 across SIZE-8..SIZE-1
+    for (let i = 0; i <= 6; i++) m[SIZE - 1 - i][8] = bit(i) === 1;   // bits 0..6 down col 8
+    for (let i = 0; i <= 7; i++) m[8][SIZE - 8 + i] = bit(7 + i) === 1; // bits 7..14 across row 8
 
-    // Version info (V10) — 18 bits, column-major, bottom-right corner of each block
+    // Version info (V7+) — 18 bits, column-major in a 6-row × 3-col block.
+    // Per ISO 18004 Annex D: bit i goes to row (i % 6), col (floor(i / 6)).
     const ver = _qrBchVersion(10);
     for (let i = 0; i < 18; i++) {
       const b = (ver >> i) & 1;
-      const r = Math.floor(i / 3);
-      const c = i % 3;
-      m[r][SIZE - 11 + c] = b === 1;
-      m[SIZE - 11 + c][r] = b === 1;
+      const r = i % 6;
+      const c = Math.floor(i / 6);
+      m[r][SIZE - 11 + c] = b === 1;     // top-right block
+      m[SIZE - 11 + c][r] = b === 1;     // bottom-left block (transposed)
     }
     return m;
   }
@@ -4237,29 +4240,43 @@
 
   // ═════ Camera-based QR scanner ═════
   let camStream = null, camActive = false, camDetector = null;
-  let camOnResult = null;
+  let camOnResult = null, camCancelled = false;
+  function qrScanSupported() {
+    return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && ('BarcodeDetector' in window));
+  }
   async function startCameraScan(onResult) {
+    if (!qrScanSupported()) {
+      // No camera/scanner — open the paste fallback inline so the user has a path
+      const pasteOpen = document.querySelector('#netHostPanel:not(.hidden) details, #netJoinPanel:not(.hidden) details');
+      if (pasteOpen) pasteOpen.open = true;
+      netStatus('QR scanning needs iPadOS 17+. Use the paste codes section below.', false);
+      return;
+    }
     camOnResult = onResult;
+    camCancelled = false;
     document.getElementById('netCamera').classList.remove('hidden');
     document.getElementById('netCamHint').textContent = 'Point your iPad at the other QR code…';
+    let stream = null;
     try {
-      camStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }, audio: false,
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } }, audio: false,
       });
-      const v = document.getElementById('netVideo');
-      v.srcObject = camStream;
-      await v.play();
-      if ('BarcodeDetector' in window) {
-        camDetector = new BarcodeDetector({ formats: ['qr_code'] });
-      } else {
-        document.getElementById('netCamHint').textContent = 'QR scanner unsupported on this browser — use the paste fallback.';
-        return;
-      }
-      camActive = true;
-      tickCameraScan();
     } catch (e) {
-      document.getElementById('netCamHint').textContent = 'Camera blocked — allow camera access or use paste fallback.';
+      const msg = (e && e.name === 'NotAllowedError')
+        ? 'Camera blocked. Allow camera in iPad Settings → Safari → Camera, or use the paste fallback.'
+        : 'Couldn\'t open camera (' + (e && e.name || 'error') + '). Use the paste fallback.';
+      document.getElementById('netCamHint').textContent = msg;
+      return;
     }
+    // User may have hit CANCEL while getUserMedia was awaiting — bail cleanly
+    if (camCancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+    camStream = stream;
+    const v = document.getElementById('netVideo');
+    v.srcObject = camStream;
+    try { await v.play(); } catch(_) {}
+    camDetector = new BarcodeDetector({ formats: ['qr_code'] });
+    camActive = true;
+    tickCameraScan();
   }
   async function tickCameraScan() {
     if (!camActive) return;
@@ -4277,6 +4294,8 @@
   }
   function stopCameraScan() {
     camActive = false;
+    camCancelled = true;
+    camDetector = null;
     document.getElementById('netCamera').classList.add('hidden');
     if (camStream) {
       camStream.getTracks().forEach(t => t.stop());
@@ -4315,6 +4334,7 @@
     });
   }
   function netReset() {
+    stopCameraScan();
     if (netDC) { try { netDC.close(); } catch(_){} netDC = null; }
     if (netPeer) { try { netPeer.close(); } catch(_){} netPeer = null; }
     netConnected = false;
@@ -4331,7 +4351,9 @@
     netDC.onclose = onNetClose;
     netDC.onmessage = onHostMessage;
     netPeer.onconnectionstatechange = () => {
-      if (['failed','closed','disconnected'].includes(netPeer.connectionState)) onNetClose();
+      // 'disconnected' is a transient ICE flap — wait for it to recover or escalate to 'failed'
+      if (['failed','closed'].includes(netPeer.connectionState)) onNetClose();
+      else if (netPeer.connectionState === 'disconnected') netStatus('Connection unstable — trying to recover…');
     };
     const offer = await netPeer.createOffer();
     await netPeer.setLocalDescription(offer);
@@ -4369,7 +4391,9 @@
       netDC.onmessage = onGuestMessage;
     };
     netPeer.onconnectionstatechange = () => {
-      if (['failed','closed','disconnected'].includes(netPeer.connectionState)) onNetClose();
+      // 'disconnected' is a transient ICE flap — wait for it to recover or escalate to 'failed'
+      if (['failed','closed'].includes(netPeer.connectionState)) onNetClose();
+      else if (netPeer.connectionState === 'disconnected') netStatus('Connection unstable — trying to recover…');
     };
     try {
       await netPeer.setRemoteDescription(decodeSdp(offerStr));

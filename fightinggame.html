@@ -14,6 +14,11 @@
     -webkit-tap-highlight-color: transparent;
     -webkit-touch-callout: none;
   }
+  /* Override the global no-select so users can copy the WebRTC handshake codes */
+  textarea, input {
+    -webkit-user-select: text; user-select: text;
+    -webkit-touch-callout: default;
+  }
   html, body {
     width: 100%; height: 100%;
     overflow: hidden;
@@ -4259,15 +4264,38 @@
     const ok = await netStartGuest(v);
     if (ok) document.getElementById('netJoinAnswerWrap').classList.remove('hidden');
   });
-  document.getElementById('netCopyHost').addEventListener('click', () => {
-    const t = document.getElementById('netHostCode');
-    t.select(); document.execCommand('copy');
-    netStatus('Host code copied.', true);
+  async function copyToClipboard(text) {
+    // Modern Clipboard API — required in iOS Safari PWA standalone mode
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_) {}
+    // Fallback: hidden textarea + execCommand (legacy browsers)
+    try {
+      const tmp = document.createElement('textarea');
+      tmp.value = text;
+      tmp.style.position = 'fixed'; tmp.style.opacity = '0';
+      tmp.style.left = '-9999px';
+      document.body.appendChild(tmp);
+      tmp.focus(); tmp.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(tmp);
+      return ok;
+    } catch (_) { return false; }
+  }
+  document.getElementById('netCopyHost').addEventListener('click', async () => {
+    const text = document.getElementById('netHostCode').value;
+    if (!text) { netStatus('Code not ready yet.', false); return; }
+    const ok = await copyToClipboard(text);
+    netStatus(ok ? 'Host code copied! AirDrop/iMessage it to the other iPad.' : 'Copy blocked — long-press the code box and use the system Copy menu.', ok);
   });
-  document.getElementById('netCopyAnswer').addEventListener('click', () => {
-    const t = document.getElementById('netJoinAnswerOut');
-    t.select(); document.execCommand('copy');
-    netStatus('Answer code copied.', true);
+  document.getElementById('netCopyAnswer').addEventListener('click', async () => {
+    const text = document.getElementById('netJoinAnswerOut').value;
+    if (!text) { netStatus('Answer not ready yet.', false); return; }
+    const ok = await copyToClipboard(text);
+    netStatus(ok ? 'Answer code copied! Send it back to the host.' : 'Copy blocked — long-press the code box and use the system Copy menu.', ok);
   });
   document.getElementById('netBackBtn').addEventListener('click', () => {
     netReset();
